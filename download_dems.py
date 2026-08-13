@@ -112,15 +112,14 @@ _INDEX_BASE_PR = (
 )
 
 # ---------------------------------------------------------------------------
-# Complete tile lists per subfolder (scraped from NOAA NCEI index pages)
-# Each entry is just the filename; the S3 URL is constructed at runtime.
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
 # Subfolders of dataset 8483 covering the STOFS-3D-Atlantic domain, in
-# ascending-priority order (earlier = lower priority). Puerto Rico ("PR")
-# lives in a separate dataset (9525). The actual .tif filenames are scraped
-# from each subfolder's index.html at runtime by get_subfolder_tiles().
+# ascending-priority order (earlier = lower priority). The actual .tif
+# filenames are scraped from each subfolder's index.html at runtime by
+# get_subfolder_tiles().
+#
+# NOTE: Puerto Rico is intentionally NOT included — it lives in a separate
+# dataset (9525) with a different index URL layout and is not needed for
+# this benchmark.
 # ---------------------------------------------------------------------------
 _SUBFOLDERS: List[str] = [
     "MA_NH_ME",
@@ -133,7 +132,6 @@ _SUBFOLDERS: List[str] = [
     "AL_nwFL",
     "LA_MS",
     "TX",
-    "PR",
 ]
 
 # Map subfolder -> (index-page base, S3 download base)
