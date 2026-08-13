@@ -192,18 +192,58 @@ topo_bound, topo_func, courant, skipped).
 
 ## Step 5 — Quick local smoke test (serial + parallel, no MPI)
 
-Verifies the whole pipeline end-to-end before burning a SLURM allocation.
-If you only downloaded one subfolder in Step 3, this is fast.
+Verifies the whole pipeline end-to-end (Geom → Hfun → meshdata) before
+burning a full SLURM allocation.
+
+**Do NOT smoke-test against the full 388-raster `$MANIFEST`** — at 1 km
+resolution over the whole domain that is the real benchmark and takes
+hours. Instead, build a tiny one-subfolder manifest first:
 
 ```bash
 cd $REPO
+
+# ~39 tiles (New England) instead of 388 — finishes in minutes:
+python download_dems.py \
+    --out-dir  $DEMS \
+    --manifest $REPO/dem_manifest_smoke.json \
+    --only     MA_NH_ME
+```
+
+Then run the smoke test **inside a short interactive allocation** (never
+do multi-process mesh generation on a login node):
+
+```bash
+# Grab a small interactive allocation:
+salloc -N 1 -n 16 -t 01:00:00 -A nos-surge -p hercules
+
+# Inside the allocation — activate env + load modules first:
+module purge
+module load intel-oneapi-compilers/2022.2.1
+module load intel-oneapi-mpi/2021.7.1
+module load hdf5/1.12.2
+module load netcdf-c/4.9.0
+module load netcdf-fortran/4.6.0
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate ocsmesh_mpi_test
+cd $REPO
+
+# Run parallel first (fastest validation); add 'serial' once it passes.
 python run_benchmark.py \
-    --manifest  $MANIFEST \
+    --manifest  $REPO/dem_manifest_smoke.json \
     --shapefile $SHP \
     --out-dir   $REPO/results_smoke \
     --nprocs    8 \
-    --modes     serial parallel
+    --modes     parallel
 ```
+
+Notes:
+- New England (MA_NH_ME) is outside the box-based refinements (box1 = West
+  FL, box2 = SC/GA), so the smoke test exercises the index-modulo
+  per-source refinements + global contour/channel, but not
+  region_constraint/patch/feature. That is still a valid pipeline check.
+- Once `parallel` succeeds, optionally re-run with `--modes serial parallel`
+  to confirm the serial path and get a first speedup number.
+- Exit the allocation with `exit` when done.
 
 ---
 
