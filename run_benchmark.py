@@ -329,10 +329,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    # Override globals from CLI
-    global GLOBAL_HMIN, GLOBAL_HMAX  # pylint: disable=global-statement
-    GLOBAL_HMIN = args.hmin
-    GLOBAL_HMAX = args.hmax
+    # Apply CLI overrides to the recipe module (build_geom_and_hfun), which
+    # is the single source of truth for the size bounds used when building
+    # the Hfun. run_benchmark's module-level GLOBAL_HMIN/HMAX are just the
+    # imported defaults for the argparse help text.
+    recipe.GLOBAL_HMIN = args.hmin
+    recipe.GLOBAL_HMAX = args.hmax
 
     # Only rank 0 does setup I/O; workers skip straight to meshdata() calls.
     if _IS_MANAGER:
@@ -343,7 +345,7 @@ def main() -> None:
         _logger.info(f"nprocs           : {args.nprocs}")
         _logger.info(f"Modes            : {args.modes}")
         _logger.info(f"MPI active       : {_MPI_ACTIVE}  (size={_SIZE})")
-        _logger.info(f"hmin={GLOBAL_HMIN} m  hmax={GLOBAL_HMAX} m")
+        _logger.info(f"hmin={recipe.GLOBAL_HMIN} m  hmax={recipe.GLOBAL_HMAX} m")
 
     # ── Load inputs ──────────────────────────────────────────────────
     if _IS_MANAGER:
@@ -412,8 +414,8 @@ def main() -> None:
             "hostname": os.uname().nodename,
             "mpi_size": _SIZE,
             "nprocs_parallel": args.nprocs,
-            "hmin": GLOBAL_HMIN,
-            "hmax": GLOBAL_HMAX,
+            "hmin": recipe.GLOBAL_HMIN,
+            "hmax": recipe.GLOBAL_HMAX,
             "n_dems": sum(
                 1 for v in manifest.values() if v.get("available")
             ),
