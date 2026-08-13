@@ -259,9 +259,9 @@ python run_benchmark.py \
     --manifest $MANIFEST --shapefile $SHP \
     --out-dir ./results --nprocs 40 --modes serial parallel
 
-# MPI — must be launched with srun/mpiexec.
+# MPI — must be launched with srun (Hercules needs --mpi=pmi2).
 # Use N+1 ranks: 1 manager (rank 0) + N workers; --nprocs is the worker count.
-srun -n 41 python run_benchmark.py \
+srun --mpi=pmi2 -n 41 python run_benchmark.py \
     --manifest $MANIFEST --shapefile $SHP \
     --out-dir ./results --nprocs 40 --modes mpi
 ```

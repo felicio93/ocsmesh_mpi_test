@@ -96,7 +96,7 @@ Always launch MPI code through Slurm with a matching PMI:
 
 ```bash
 # Inside an allocation:
-salloc -N 1 -n 2 -t 00:10:00 -A <account> -p <partition>
+salloc -N 1 -n 2 -t 00:10:00 -A nos-surge -p hercules
 
 # Verify with srun (pick the PMI your Slurm supports):
 srun --mpi=pmi2 -n 2 python -c \
@@ -118,6 +118,38 @@ friendly message such as:
 > "MPI failed to initialize. Are you running under srun/mpirun with the
 >  correct --mpi=pmiX? A bare 'python script.py' cannot initialize MPI."
 instead of surfacing a raw `PMI2_Job_GetId` abort. Good UX improvement.
+
+---
+
+## #4 — Confirmed working: `srun --mpi=pmi2` on Hercules
+
+**Symptom / status**
+Resolution of #3. With mpi4py built from source against Intel MPI (#2),
+this launches correctly:
+
+```bash
+srun --mpi=pmi2 -n 2 python -c \
+  "from mpi4py import MPI; c=MPI.COMM_WORLD; print('rank', c.Get_rank(), 'of', c.Get_size())"
+# rank 1 of 2
+# rank 0 of 2
+```
+
+**Takeaway**
+`--mpi=pmi2` is the confirmed working PMI on Hercules. Both benchmark
+SLURM scripts now pass `--mpi=pmi2` to every `srun` MPI launch. If a
+future Hercules change breaks this, run `srun --mpi=list` and switch to
+the supported type (e.g. `pmix`).
+
+**Confirmed Slurm/allocation values (from a working nos-surge job card):**
+- `--account=nos-surge`
+- `--partition=hercules`
+- Node size: **80 cores / 512 GB per node** (use `--exclusive`)
+- Windfall queue note: max 450 nodes, no walltime limit but lower priority;
+  for quick turnaround keep walltime <= 8 hrs.
+
+**OCSMesh-side?**
+No — site config. Recorded here so the SLURM scripts and the OCSMesh MPI
+docs can cite a known-good Hercules launch recipe.
 
 ---
 

@@ -8,9 +8,9 @@
 #   - MPI point-to-point correctness across inter-node connections
 #   - Scalability: speedup as a function of total MPI ranks
 #
-# Configuration: 4 nodes × 56 cores = 224 ranks total
+# Configuration: 4 nodes × 80 cores = 320 ranks total
 #   Rank 0  = manager (dispatches tasks)
-#   Ranks 1-223 = workers (execute meshdata tasks)
+#   Ranks 1-319 = workers (execute meshdata tasks)
 #
 # The serial and parallel baselines were already measured in the single-node
 # run; this script runs only the MPI mode for the multi-node speedup study.
@@ -19,16 +19,17 @@
 # =============================================================================
 
 #SBATCH --job-name=ocsmesh_bench_multinode
+#SBATCH --account=nos-surge
 #SBATCH --partition=hercules
 #SBATCH --nodes=4
-#SBATCH --ntasks-per-node=56
+#SBATCH --ntasks-per-node=80
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=180G
+#SBATCH --exclusive
 #SBATCH --time=06:00:00
 #SBATCH --output=logs/bench_multinode_%j.out
 #SBATCH --error=logs/bench_multinode_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=Felicio.Cassalho@noaa.gov
+#SBATCH --mail-user=felicio.cassalho@noaa.gov
 
 # ── Paths (edit only if your layout differs) ─────────────────────────────────
 PROJ="/work2/noaa/nos-surge/felicioc/OCSMesh_MPI"
@@ -43,7 +44,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 set -euo pipefail
 
-TOTAL_RANKS=$((SLURM_NNODES * 56))
+TOTAL_RANKS=$((SLURM_NNODES * 80))
 NWORKERS=$((TOTAL_RANKS - 1))
 
 mkdir -p "${RESULTS_DIR}" logs
@@ -97,9 +98,12 @@ fi
 echo ""
 echo "--- MPI benchmark: ${TOTAL_RANKS} ranks across ${SLURM_NNODES} nodes ---"
 
-srun --ntasks=${TOTAL_RANKS} \
+# --mpi=pmi2 is required on Hercules (confirmed working; the wrong PMI or a
+# bare launch aborts with 'PMI2_Job_GetId returned 14'). See HERCULES_NOTES #3/#4.
+srun --mpi=pmi2 \
+     --ntasks=${TOTAL_RANKS} \
      --nodes=${SLURM_NNODES} \
-     --ntasks-per-node=56 \
+     --ntasks-per-node=80 \
      --distribution=cyclic \
      python "${SCRIPT_DIR}/run_benchmark.py" \
         --manifest   "${MANIFEST}" \

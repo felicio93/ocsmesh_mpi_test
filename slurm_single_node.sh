@@ -5,24 +5,25 @@
 # Tests serial, parallel (multiprocessing), and MPI on ONE Hercules node.
 # This is the first thing to run: validates the full pipeline before scaling.
 #
-# Hercules node specs (2023): 2x Intel Xeon Platinum 8280 = 56 cores/node
-# We request all 56 cores, use 1 rank for Rank 0 + 55 worker ranks for MPI,
-# and nprocs=55 for the multiprocessing baseline.
+# Hercules node specs: 80 cores/node, 512 GB/node.
+# We request the whole node (--exclusive), use 1 rank for Rank 0 (manager)
+# + 79 worker ranks for MPI, and nprocs=79 for the multiprocessing baseline.
 #
 # Submit: sbatch slurm_single_node.sh
 # =============================================================================
 
 #SBATCH --job-name=ocsmesh_bench_1node
+#SBATCH --account=nos-surge
 #SBATCH --partition=hercules
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=56          # 1 manager + 55 MPI workers
+#SBATCH --ntasks-per-node=80          # 1 manager + 79 MPI workers
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=180G                    # ~3.2 GB/core — leave OS headroom
+#SBATCH --exclusive                   # whole node (512 GB)
 #SBATCH --time=08:00:00
 #SBATCH --output=logs/bench_1node_%j.out
 #SBATCH --error=logs/bench_1node_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=Felicio.Cassalho@noaa.gov
+#SBATCH --mail-user=felicio.cassalho@noaa.gov
 
 # ── Paths (edit only if your layout differs) ─────────────────────────────────
 PROJ="/work2/noaa/nos-surge/felicioc/OCSMesh_MPI"
@@ -85,7 +86,7 @@ fi
 # ── Step 2: Serial + Parallel benchmarks (single process) ────────────────────
 echo ""
 echo "--- Step 2: Serial and Parallel benchmarks ---"
-NPROCS=55   # = ntasks_per_node - 1 (leave one for manager)
+NPROCS=79   # = ntasks_per_node - 1 (leave one for the MPI manager)
 
 python "${SCRIPT_DIR}/run_benchmark.py" \
     --manifest "${MANIFEST}" \
@@ -94,16 +95,18 @@ python "${SCRIPT_DIR}/run_benchmark.py" \
     --nprocs    "${NPROCS}" \
     --modes     serial parallel
 
-# ── Step 3: MPI benchmark (all 56 ranks) ─────────────────────────────────────
+# ── Step 3: MPI benchmark (all 80 ranks) ─────────────────────────────────────
 echo ""
-echo "--- Step 3: MPI benchmark (56 ranks) ---"
+echo "--- Step 3: MPI benchmark (80 ranks) ---"
 
 # Shared filesystem for MPI intermediate files
 MPI_TMPDIR="${RESULTS_DIR}/mpi_tmp"
 mkdir -p "${MPI_TMPDIR}"
 export TMPDIR="${MPI_TMPDIR}"
 
-srun --ntasks=56 --nodes=1 python "${SCRIPT_DIR}/run_benchmark.py" \
+# --mpi=pmi2 is required on Hercules (confirmed working; a bare launch or
+# the wrong PMI aborts with 'PMI2_Job_GetId returned 14'). See HERCULES_NOTES #3/#4.
+srun --mpi=pmi2 --ntasks=80 --nodes=1 python "${SCRIPT_DIR}/run_benchmark.py" \
     --manifest "${MANIFEST}" \
     --shapefile "${STOFS_SHAPEFILE}" \
     --out-dir   "${RESULTS_DIR}/mpi" \
