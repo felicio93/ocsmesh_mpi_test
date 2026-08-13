@@ -28,15 +28,16 @@
 #SBATCH --output=logs/bench_multinode_%j.out
 #SBATCH --error=logs/bench_multinode_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=CHANGE_ME@noaa.gov
+#SBATCH --mail-user=Felicio.Cassalho@noaa.gov
 
-# ── CHANGE THESE ─────────────────────────────────────────────────────────────
+# ── Paths (edit only if your layout differs) ─────────────────────────────────
+PROJ="/work2/noaa/nos-surge/felicioc/OCSMesh_MPI"
 CONDA_ENV="ocsmesh"
-STOFS_SHAPEFILE="/work/noaa/CHANGE_ME/stofs_domain.shp"
-MANIFEST="/work/noaa/CHANGE_ME/stofs_dems/dem_manifest.json"
-# IMPORTANT: This MUST be a path on a shared filesystem visible to ALL nodes
-# (Lustre, GPFS, NFS) — NOT node-local /tmp.
-RESULTS_DIR="/work/noaa/CHANGE_ME/results/multi_node_${SLURM_JOB_ID}"
+STOFS_SHAPEFILE="${PROJ}/inputs/stofs3.shp"
+MANIFEST="${PROJ}/stofs_dems/dem_manifest.json"
+# IMPORTANT: RESULTS_DIR MUST be on a shared filesystem visible to ALL nodes
+# (Lustre/GPFS) — /work2 qualifies; node-local /tmp does NOT.
+RESULTS_DIR="${PROJ}/results/multi_node_${SLURM_JOB_ID}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ─────────────────────────────────────────────────────────────────────────────
 

@@ -4,18 +4,27 @@ End-to-end test of the new OCSMesh MPI parallelization against the serial
 and multiprocessing modes, using real-world DEMs for the STOFS-3D-Atlantic
 domain on the NOAA RDHPC (Hercules).
 
+All paths in this README and in the SLURM scripts are hard-wired to:
+
+```
+/work2/noaa/nos-surge/felicioc/OCSMesh_MPI
+```
+
+If you use a different location, edit the `PROJ=` line below and the
+`PROJ=` line at the top of each SLURM script.
+
 ---
 
 ## Files
 
 ```
 ocsmesh_mpi_test/
-├── download_dems.py         # Step 1 – download GEBCO + CUDEM 1/9" tiles
+├── download_dems.py         # Step 3 – download GEBCO + CUDEM 1/9" tiles
 ├── build_geom_and_hfun.py   # Geom/Hfun recipe (raster order + refinements)
-├── run_benchmark.py         # Step 3 – run serial/parallel/MPI + profile
-├── analyze_profile.py       # Step 4 – build the human-readable report
-├── slurm_single_node.sh     # SLURM wrapper: single node, all 3 modes
-├── slurm_multi_node.sh      # SLURM wrapper: multi-node MPI scaling
+├── run_benchmark.py         # Step 5 – run serial/parallel/MPI + profile
+├── analyze_profile.py       # Step 7 – build the human-readable report
+├── slurm_single_node.sh     # SLURM: single node, all 3 modes
+├── slurm_multi_node.sh      # SLURM: multi-node MPI scaling
 └── README.md
 ```
 
@@ -56,91 +65,105 @@ Every `HfunCollector` refinement method is exercised at least once.
 
 ---
 
-## Prerequisites (one-time)
-
-### 1. OCSMesh + mpi4py in a conda env on Hercules
+## Step 1 — Set up shell environment (once per session)
 
 ```bash
-module purge
-module load intel/2022.1.2        # match to Hercules; sets the MPI toolchain
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate ocsmesh            # your env name
+export PROJ=/work2/noaa/nos-surge/felicioc/OCSMesh_MPI
+export REPO=$PROJ/ocsmesh_mpi_test
+export DEMS=$PROJ/stofs_dems
+export SHP=$PROJ/inputs/stofs3.shp
+export MANIFEST=$REPO/dem_manifest.json
 
-# Install the MPI branch of OCSMesh in editable mode with the mpi extra:
-pip install -e /path/to/OCSMesh[mpi]
-
-# Verify mpi4py is linked against the loaded MPI:
-python -c "from mpi4py import MPI; print('MPI', MPI.Get_version())"
+mkdir -p $PROJ
 ```
-
-The conda env MUST be built against the same MPI that `module load` provides,
-otherwise `srun`/`mpiexec` and `mpi4py` will disagree at runtime.
-
-### 2. Clone this repo on Hercules
-
-```bash
-cd /work/noaa/<project>/<user>
-git clone https://github.com/felicio93/ocsmesh_mpi_test.git
-cd ocsmesh_mpi_test
-```
-
-### 3. Have the STOFS-3D-Atlantic domain shapefile on Hercules
-
-Note its full path — you pass it via `--shapefile`.
 
 ---
 
-## Step-by-step (copy-paste)
+## Step 2 — Clone and install OCSMesh (editable) + clone this repo
 
-Set these once per shell session (edit to your paths):
+Editable install (`-e`) means any later `git pull` in the OCSMesh repo is
+picked up immediately with no reinstall.
 
 ```bash
-export PROJ=/work/noaa/<project>/<user>
-export REPO=$PROJ/ocsmesh_mpi_test
-export DEMS=$PROJ/stofs_dems
-export SHP=$PROJ/stofs_domain.shp
-export MANIFEST=$REPO/dem_manifest.json
+# Load the toolchain FIRST so mpi4py builds against the right MPI.
+module purge
+module load intel/2022.1.2          # adjust to Hercules' actual module names
+module load hdf5/1.12.2
+module load netcdf/4.8.1
 
+# Activate (or create) the conda env.
 source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate ocsmesh
-cd $REPO
+conda activate ocsmesh              # your env name
+
+# --- Clone OCSMesh (the MPI branch) into $PROJ ---
+cd $PROJ
+git clone https://github.com/noaa-ocs-modeling/OCSMesh.git
+cd OCSMesh
+# git checkout <mpi-branch>          # if the MPI work is on a branch, check it out
+# (submodules, if any)
+git submodule update --init --recursive
+
+# --- Editable install WITH the mpi extra (installs mpi4py) ---
+pip install -e ".[mpi]"
+
+# Verify mpi4py links against the loaded MPI:
+python -c "from mpi4py import MPI; print('mpi4py MPI:', MPI.Get_version())"
+python -c "import ocsmesh; print('ocsmesh at', ocsmesh.__file__)"
+
+# --- Clone this benchmark repo into $PROJ ---
+cd $PROJ
+git clone https://github.com/felicio93/ocsmesh_mpi_test.git
 ```
 
-### Step 1 — Download the DEMs
+> The editable install means `$PROJ/OCSMesh` is your live source tree. To
+> update: `cd $PROJ/OCSMesh && git pull` — your Python env uses the new
+> code immediately, no reinstall needed.
 
-Run on a login node or a short interactive allocation (network access
-required). Re-runnable: existing files are skipped.
+---
+
+## Step 3 — Download the DEMs
+
+Run on a login node (network access required). Re-runnable: existing files
+are skipped.
 
 ```bash
+cd $REPO
+
 # Dry run first — prints how many tiles / how much data, no download:
 python download_dems.py --out-dir $DEMS --manifest $MANIFEST --dry-run
 
 # Real download (~50 GB, takes a while):
 python download_dems.py --out-dir $DEMS --manifest $MANIFEST
 
-# Or download only one subfolder to test the pipeline quickly:
+# Or grab just one subfolder to test the pipeline quickly:
 python download_dems.py --out-dir $DEMS --manifest $MANIFEST --only MA_NH_ME
 ```
 
-This writes `dem_manifest.json` (consumed by the benchmark).
+This writes `$MANIFEST` (consumed by the benchmark).
 
-### Step 2 — Sanity-check the refinement assignment
+---
+
+## Step 4 — Sanity-check the refinement assignment
 
 Confirms which tiles map to which refinement class. No meshing, instant.
 
 ```bash
+cd $REPO
 python build_geom_and_hfun.py --manifest $MANIFEST
 ```
 
 You should see counts per modulo class (flow_limiter, constant_value,
 topo_bound, topo_func, courant, skipped).
 
-### Step 3 — Quick local smoke test (serial + parallel, no MPI)
+---
+
+## Step 5 — Quick local smoke test (serial + parallel, no MPI)
 
 Verifies the whole pipeline end-to-end before burning a SLURM allocation.
-Use `--only MA_NH_ME` in Step 1 first if you want this to be fast.
+If you only downloaded one subfolder in Step 3, this is fast.
 
 ```bash
+cd $REPO
 python run_benchmark.py \
     --manifest  $MANIFEST \
     --shapefile $SHP \
@@ -149,50 +172,56 @@ python run_benchmark.py \
     --modes     serial parallel
 ```
 
-### Step 4 — Single-node SLURM run (serial + parallel + MPI)
+---
 
-Edit the `CHANGE_ME` placeholders at the top of `slurm_single_node.sh`
-first (conda env, shapefile, DEM dir, results dir, email, module lines):
+## Step 6 — Single-node SLURM run (serial + parallel + MPI)
+
+The paths in `slurm_single_node.sh` are already set to
+`/work2/noaa/nos-surge/felicioc/OCSMesh_MPI`. Verify the `module load`
+lines match Hercules, then submit:
 
 ```bash
-mkdir -p $REPO/logs
+cd $REPO
+mkdir -p logs
 sbatch slurm_single_node.sh
-```
 
-Watch it:
-
-```bash
+# Watch it:
 squeue -u $USER
-tail -f $REPO/logs/bench_1node_*.out
+tail -f logs/bench_1node_*.out
 ```
 
-Output lands in `results/single_node_<jobid>/` with
+Output lands in `$PROJ/results/single_node_<jobid>/` with
 `benchmark_results.json`, `profile_{serial,parallel,mpi}.prof`, and
 `benchmark_report.txt`.
 
-### Step 5 — Multi-node SLURM run (MPI scaling)
+---
 
-Only after the single-node run works. Edit `slurm_multi_node.sh`
-placeholders — crucially point `TMPDIR`/results at a **shared**
-filesystem (Lustre/GPFS), never node-local `/tmp`.
+## Step 7 — Multi-node SLURM run (MPI scaling)
+
+Only after the single-node run works.
 
 ```bash
+cd $REPO
 sbatch slurm_multi_node.sh
 ```
 
-`MPIExecutor.verify_shared_filesystem()` runs at the start of each MPI
-dispatch and aborts early with a clear message if any worker node can't
-read/write the shared scratch dir.
+`RESULTS_DIR` and the MPI scratch live under `/work2` (shared Lustre), so
+cross-node `.npz` exchange works. `MPIExecutor.verify_shared_filesystem()`
+runs at the start of each MPI dispatch and aborts early with a clear
+message if any worker node can't read/write the shared scratch dir.
 
-### Step 6 — Generate / combine reports
+---
+
+## Step 8 — Generate / combine reports
 
 The SLURM scripts already call `analyze_profile.py`. To combine the
 single-node and multi-node runs into one report:
 
 ```bash
+cd $REPO
 python analyze_profile.py \
-    --results-dir results/single_node_<jobid> \
-                  results/multi_node_<jobid> \
+    --results-dir $PROJ/results/single_node_<jobid> \
+                  $PROJ/results/multi_node_<jobid> \
     --out combined_benchmark_report.txt
 ```
 
@@ -201,6 +230,8 @@ python analyze_profile.py \
 ## Running the benchmark by hand (outside SLURM)
 
 ```bash
+cd $REPO
+
 # Serial + parallel (no mpiexec needed):
 python run_benchmark.py \
     --manifest $MANIFEST --shapefile $SHP \
@@ -246,7 +277,6 @@ speedup table.
   `meshdata()` calls are distributed. This is the next parallelization
   target.
 - On multi-node jobs, intermediate `.npz` files are exchanged via the
-  shared filesystem — set `TMPDIR` to Lustre/GPFS (done in the multi-node
-  SLURM script).
+  shared filesystem — `RESULTS_DIR` under `/work2` handles this.
 - `download_dems.py` selects every other tile per subfolder; edit the
   `_TILES` lists or `select_every_other()` to change coverage.

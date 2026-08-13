@@ -22,14 +22,15 @@
 #SBATCH --output=logs/bench_1node_%j.out
 #SBATCH --error=logs/bench_1node_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=CHANGE_ME@noaa.gov
+#SBATCH --mail-user=Felicio.Cassalho@noaa.gov
 
-# ── CHANGE THESE ─────────────────────────────────────────────────────────────
+# ── Paths (edit only if your layout differs) ─────────────────────────────────
+PROJ="/work2/noaa/nos-surge/felicioc/OCSMesh_MPI"
 CONDA_ENV="ocsmesh"                               # conda env with OCSMesh + mpi4py
-STOFS_SHAPEFILE="/work/noaa/CHANGE_ME/stofs_domain.shp"
-DEM_OUT_DIR="/work/noaa/CHANGE_ME/stofs_dems"
+STOFS_SHAPEFILE="${PROJ}/inputs/stofs3.shp"
+DEM_OUT_DIR="${PROJ}/stofs_dems"
 MANIFEST="${DEM_OUT_DIR}/dem_manifest.json"
-RESULTS_DIR="/work/noaa/CHANGE_ME/results/single_node_${SLURM_JOB_ID}"
+RESULTS_DIR="${PROJ}/results/single_node_${SLURM_JOB_ID}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ─────────────────────────────────────────────────────────────────────────────
 
