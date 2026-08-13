@@ -25,6 +25,7 @@ ocsmesh_mpi_test/
 ├── analyze_profile.py       # Step 7 – build the human-readable report
 ├── slurm_single_node.sh     # SLURM: single node, all 3 modes
 ├── slurm_multi_node.sh      # SLURM: multi-node MPI scaling
+├── HERCULES_NOTES.md        # running log of HPC gotchas + OCSMesh feedback
 └── README.md
 ```
 
@@ -106,12 +107,26 @@ cd OCSMesh
 # (submodules, if any)
 git submodule update --init --recursive
 
-# --- Editable install WITH the mpi extra (installs mpi4py) ---
-pip install -e ".[mpi]"
+# --- Editable install of ocsmesh (core deps only) ---
+# NOTE: do NOT rely on the ".[mpi]" extra on HPC. It pulls a PREBUILT
+# mpi4py wheel that is linked against a generic/bundled MPI, which then
+# fails under srun with Intel MPI. See HERCULES_NOTES.md #1 and #2.
+pip install -e .
 
-# Verify mpi4py links against the loaded MPI:
-python -c "from mpi4py import MPI; print('mpi4py MPI:', MPI.Get_version())"
+# --- Build mpi4py FROM SOURCE against the loaded Intel MPI module ---
+# MPICC points the build at the site MPI compiler wrapper; --no-binary
+# forces a source build (no cached/prebuilt wheel).
+which mpicc                                  # sanity: must resolve to Intel MPI
+MPICC=$(which mpicc) pip install --no-binary=mpi4py --no-cache-dir mpi4py
+
+# Verify ocsmesh imports:
 python -c "import ocsmesh; print('ocsmesh at', ocsmesh.__file__)"
+
+# Verify mpi4py — MUST be run under srun, NOT as a bare 'python -c'.
+# A bare run aborts with 'PMI2_Job_GetId returned 14' because there is no
+# PMI server outside a launcher. See HERCULES_NOTES.md #3.
+srun --mpi=pmi2 -n 2 python -c \
+  "from mpi4py import MPI; c=MPI.COMM_WORLD; print('rank', c.Get_rank(), 'of', c.Get_size())"
 
 # --- Clone this benchmark repo into $PROJ ---
 cd $PROJ
@@ -121,6 +136,10 @@ git clone https://github.com/felicio93/ocsmesh_mpi_test.git
 > The editable install means `$PROJ/OCSMesh` is your live source tree. To
 > update: `cd $PROJ/OCSMesh && git pull` — your Python env uses the new
 > code immediately, no reinstall needed.
+>
+> If `srun --mpi=pmi2` errors, list the PMI types your Slurm supports with
+> `srun --mpi=list` and use the matching one (e.g. `pmix`). See
+> `HERCULES_NOTES.md` for the full troubleshooting log.
 
 ---
 
