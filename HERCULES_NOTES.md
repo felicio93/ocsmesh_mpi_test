@@ -231,6 +231,79 @@ No — benchmark data-sourcing only. Not an OCSMesh code concern.
 
 ---
 
+## #7 — `ocsmesh.mpi` missing, and MPI init on import inside an allocation
+
+Two related findings hit in sequence during the first smoke test.
+
+### 7a — `ModuleNotFoundError: No module named 'ocsmesh.mpi'`
+
+**Symptom**
+```
+from ocsmesh.mpi import (...)
+ModuleNotFoundError: No module named 'ocsmesh.mpi'
+```
+even though `ocsmesh` imports fine and is the editable install at
+`$PROJ/OCSMesh/ocsmesh/__init__.py`.
+
+**Root cause**
+The MPI implementation (`ocsmesh/mpi.py`, `MPIExecutor`) lives on the
+**`dev`** branch of OCSMesh. A default clone checks out `main`/`master`,
+which does not contain `mpi.py`.
+
+**Workaround**
+```bash
+cd $PROJ/OCSMesh
+git checkout dev
+git pull
+ls -la ocsmesh/mpi.py                       # confirm it exists
+python -c "from ocsmesh.mpi import MPIExecutor; print('mpi OK')"
+```
+Editable install picks up the branch switch immediately — no reinstall.
+
+**OCSMesh-side?**
+Docs / release. Until `dev` merges to `main`, the MPI feature isn't on
+the default branch, so any "clone + install" following the main README
+will lack it. Worth a prominent note in the OCSMesh MPI docs (and this
+benchmark's README now does `git checkout dev` explicitly).
+
+### 7b — `PMI2_Job_GetId returned 14` even in non-MPI (`parallel`) mode
+
+**Symptom**
+Inside a `salloc` allocation, launching with a bare `python` (not srun)
+aborts at import, even for `--modes parallel` (which uses
+multiprocessing, not MPI):
+```
+Abort(1090831) ... PMIR_pmi_init(167)...: PMI2_Job_GetId returned 14
+```
+
+**Root cause**
+`import ocsmesh` runs `ocsmesh/__init__.py`, which calls
+`_configure_mpi_environment()`. Under a Slurm allocation the MPI env
+vars are present, so `mpi4py`/`MPI_Init` fires on plain import — but a
+bare `python` process has no PMI server, so init aborts. (On a login
+node with no allocation this does not happen, because the Slurm env vars
+are absent and MPI stays dormant.)
+
+**Workaround**
+Always launch through `srun --mpi=pmi2`, even for non-MPI modes:
+```bash
+# parallel / serial (single task; multiprocessing spawns its own workers):
+srun --mpi=pmi2 -n 1 python run_benchmark.py ... --modes parallel
+
+# mpi (N+1 ranks = 1 manager + N workers):
+srun --mpi=pmi2 -n 9 python run_benchmark.py ... --nprocs 8 --modes mpi
+```
+
+**OCSMesh-side?**
+Yes — UX improvement candidate. Having `MPI_Init` fire as a side effect
+of plain `import ocsmesh` (inside an allocation) is surprising and makes
+non-MPI use awkward under Slurm. The developer may want MPI
+initialization to stay lazy until an MPI feature is actually invoked
+(e.g. only inside `MPIExecutor`), so `import ocsmesh` and
+`multiprocessing`-based runs don't require a launcher.
+
+---
+
 ## Template for new entries
 
 ```

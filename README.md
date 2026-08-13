@@ -99,13 +99,16 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 conda create -y -n ocsmesh_mpi_test python=3.10
 conda activate ocsmesh_mpi_test
 
-# --- Clone OCSMesh (the MPI branch) into $PROJ ---
+# --- Clone OCSMesh into $PROJ and check out the dev (MPI) branch ---
+# The MPI implementation lives on the 'dev' branch. A default clone
+# (main) has NO ocsmesh/mpi.py and imports fail with
+# "ModuleNotFoundError: No module named 'ocsmesh.mpi'". See HERCULES_NOTES #7.
 cd $PROJ
 git clone https://github.com/noaa-ocs-modeling/OCSMesh.git
 cd OCSMesh
-# git checkout <mpi-branch>          # if the MPI work is on a branch, check it out
-# (submodules, if any)
-git submodule update --init --recursive
+git checkout dev                     # <-- REQUIRED: MPI code is on dev
+git pull
+git submodule update --init --recursive   # (if any submodules)
 
 # --- Editable install of ocsmesh (core deps only) ---
 # NOTE: do NOT rely on the ".[mpi]" extra on HPC. It pulls a PREBUILT
@@ -119,8 +122,9 @@ pip install -e .
 which mpicc                                  # sanity: must resolve to Intel MPI
 MPICC=$(which mpicc) pip install --no-binary=mpi4py --no-cache-dir mpi4py
 
-# Verify ocsmesh imports:
+# Verify ocsmesh + the MPI module import:
 python -c "import ocsmesh; print('ocsmesh at', ocsmesh.__file__)"
+python -c "from ocsmesh.mpi import MPIExecutor; print('ocsmesh.mpi OK')"
 
 # Verify mpi4py — MUST be run under srun, NOT as a bare 'python -c'.
 # A bare run aborts with 'PMI2_Job_GetId returned 14' because there is no
@@ -190,10 +194,10 @@ topo_bound, topo_func, courant, skipped).
 
 ---
 
-## Step 5 — Quick local smoke test (serial + parallel, no MPI)
+## Step 5 — Quick smoke test (small manifest, in an allocation)
 
 Verifies the whole pipeline end-to-end (Geom → Hfun → meshdata) before
-burning a full SLURM allocation.
+burning a full SLURM job.
 
 **Do NOT smoke-test against the full 388-raster `$MANIFEST`** — at 1 km
 resolution over the whole domain that is the real benchmark and takes
@@ -210,13 +214,29 @@ python download_dems.py \
 ```
 
 Then run the smoke test **inside a short interactive allocation** (never
-do multi-process mesh generation on a login node):
+do multi-process mesh generation on a login node).
+
+> IMPORTANT: launch the benchmark with `srun --mpi=pmi2`, NOT a bare
+> `python`. Inside a Slurm allocation, `import ocsmesh` initializes MPI
+> (Slurm env vars are present), so even the non-MPI `parallel` mode aborts
+> at import with `PMI2_Job_GetId returned 14` if launched as a plain
+> `python`. See HERCULES_NOTES.md #7.
 
 ```bash
-# Grab a small interactive allocation:
+# 1) Grab a small interactive allocation:
 salloc -N 1 -n 16 -t 01:00:00 -A nos-surge -p hercules
+```
 
-# Inside the allocation — activate env + load modules first:
+`salloc` drops you into a NEW shell on the compute node — your exported
+vars and modules do NOT carry over. Re-set them inside the allocation:
+
+```bash
+# 2) Inside the allocation, re-export vars + load env:
+export PROJ=/work2/noaa/nos-surge/felicioc/OCSMesh_MPI
+export REPO=$PROJ/ocsmesh_mpi_test
+export DEMS=$PROJ/stofs_dems
+export SHP=$PROJ/inputs/stofs3.shp
+
 module purge
 module load intel-oneapi-compilers/2022.2.1
 module load intel-oneapi-mpi/2021.7.1
@@ -226,14 +246,29 @@ module load netcdf-fortran/4.6.0
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate ocsmesh_mpi_test
 cd $REPO
+```
 
-# Run parallel first (fastest validation); add 'serial' once it passes.
-python run_benchmark.py \
+```bash
+# 3a) Test MPI mode (recommended — this is the point of the benchmark).
+#     9 ranks = 1 manager + 8 workers; --nprocs is the worker count.
+srun --mpi=pmi2 -n 9 python run_benchmark.py \
     --manifest  $REPO/dem_manifest_smoke.json \
     --shapefile $SHP \
     --out-dir   $REPO/results_smoke \
     --nprocs    8 \
-    --modes     parallel
+    --modes     mpi
+```
+
+```bash
+# 3b) OR test serial + parallel (multiprocessing) with a single task.
+#     Use -n 1: multiprocessing spawns its own workers; srun -n 1 just
+#     gives the one python process a valid PMI context so MPI_Init works.
+srun --mpi=pmi2 -n 1 python run_benchmark.py \
+    --manifest  $REPO/dem_manifest_smoke.json \
+    --shapefile $SHP \
+    --out-dir   $REPO/results_smoke \
+    --nprocs    8 \
+    --modes     serial parallel
 ```
 
 Notes:
@@ -241,8 +276,6 @@ Notes:
   FL, box2 = SC/GA), so the smoke test exercises the index-modulo
   per-source refinements + global contour/channel, but not
   region_constraint/patch/feature. That is still a valid pipeline check.
-- Once `parallel` succeeds, optionally re-run with `--modes serial parallel`
-  to confirm the serial path and get a first speedup number.
 - Exit the allocation with `exit` when done.
 
 ---
