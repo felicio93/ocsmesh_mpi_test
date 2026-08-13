@@ -87,13 +87,16 @@ picked up immediately with no reinstall.
 ```bash
 # Load the toolchain FIRST so mpi4py builds against the right MPI.
 module purge
-module load intel/2022.1.2          # adjust to Hercules' actual module names
+module load intel-oneapi-compilers/2022.2.1
+module load intel-oneapi-mpi/2021.7.1
 module load hdf5/1.12.2
-module load netcdf/4.8.1
+module load netcdf-c/4.9.0
+module load netcdf-fortran/4.6.0
 
-# Activate (or create) the conda env.
+# Create and activate the conda env (named ocsmesh_mpi_test).
 source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate ocsmesh              # your env name
+conda create -y -n ocsmesh_mpi_test python=3.10
+conda activate ocsmesh_mpi_test
 
 # --- Clone OCSMesh (the MPI branch) into $PROJ ---
 cd $PROJ

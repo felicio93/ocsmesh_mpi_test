@@ -26,7 +26,7 @@
 
 # ── Paths (edit only if your layout differs) ─────────────────────────────────
 PROJ="/work2/noaa/nos-surge/felicioc/OCSMesh_MPI"
-CONDA_ENV="ocsmesh"                               # conda env with OCSMesh + mpi4py
+CONDA_ENV="ocsmesh_mpi_test"                      # conda env with OCSMesh + mpi4py
 STOFS_SHAPEFILE="${PROJ}/inputs/stofs3.shp"
 DEM_OUT_DIR="${PROJ}/stofs_dems"
 MANIFEST="${DEM_OUT_DIR}/dem_manifest.json"
@@ -48,9 +48,11 @@ echo "================================================================="
 
 # ── Environment ───────────────────────────────────────────────────────────────
 module purge
-module load intel/2022.1.2          # Intel MPI & compilers (adjust to Hercules modules)
+module load intel-oneapi-compilers/2022.2.1
+module load intel-oneapi-mpi/2021.7.1
 module load hdf5/1.12.2
-module load netcdf/4.8.1
+module load netcdf-c/4.9.0
+module load netcdf-fortran/4.6.0
 
 # Activate conda
 source "$(conda info --base)/etc/profile.d/conda.sh"

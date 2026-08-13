@@ -32,7 +32,7 @@
 
 # ── Paths (edit only if your layout differs) ─────────────────────────────────
 PROJ="/work2/noaa/nos-surge/felicioc/OCSMesh_MPI"
-CONDA_ENV="ocsmesh"
+CONDA_ENV="ocsmesh_mpi_test"
 STOFS_SHAPEFILE="${PROJ}/inputs/stofs3.shp"
 MANIFEST="${PROJ}/stofs_dems/dem_manifest.json"
 # IMPORTANT: RESULTS_DIR MUST be on a shared filesystem visible to ALL nodes
@@ -59,9 +59,11 @@ echo "================================================================="
 
 # ── Environment ───────────────────────────────────────────────────────────────
 module purge
-module load intel/2022.1.2
+module load intel-oneapi-compilers/2022.2.1
+module load intel-oneapi-mpi/2021.7.1
 module load hdf5/1.12.2
-module load netcdf/4.8.1
+module load netcdf-c/4.9.0
+module load netcdf-fortran/4.6.0
 
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "${CONDA_ENV}"
