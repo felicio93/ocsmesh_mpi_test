@@ -197,6 +197,40 @@ now fixed. Not an OCSMesh code concern.
 
 ---
 
+## #6 — CUDEM tile downloads 404 (hardcoded filenames were stale/guessed)
+
+**Symptom**
+Many CUDEM tiles 404 during download, e.g.:
+```
+404 Client Error: Not Found for url:
+https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/FL/ncei19_n25x00_w082x00_2020v1.tif
+```
+Some subfolders (MA_NH_ME, rima, chesapeake_bay, NC) downloaded fine;
+others (southeast, FL, LA_MS, TX) had many misses.
+
+**Root cause**
+`download_dems.py` originally carried HARDCODED tile-name lists. For the
+subfolders that were scraped completely up-front they were correct; for
+the larger ones (FL ~109 tiles, LA_MS ~119, TX ~97, southeast ~75) the
+lists were partially hand-guessed, so the filenames (wrong year/version
+suffix, wrong lon/lat step) did not exist on S3 → 404.
+
+**Fix**
+Scrape each subfolder's `index.html` at RUNTIME and regex out the real
+`ncei19_*.tif` names, then pick every other tile:
+```
+https://coast.noaa.gov/htdata/raster2/elevation/NCEI_ninth_Topobathy_2014_8483/<subfolder>/index.html
+```
+Implemented as `get_subfolder_tiles(subfolder)` with a compiled regex
+`ncei19_[ns]\\d+[xX]\\d+_[ew]\\d+[xX]\\d+_\\d{4}v\\d+\\.tif` (uppercase X
+allowed — some FL tiles use it). No filenames are hardcoded anymore, so
+the lists can never go stale.
+
+**OCSMesh-side?**
+No — benchmark data-sourcing only. Not an OCSMesh code concern.
+
+---
+
 ## Template for new entries
 
 ```

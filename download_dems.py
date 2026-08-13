@@ -3,13 +3,18 @@
 Strategy
 --------
 1 GEBCO tile  (full domain, 15 arc-sec, LOWEST priority)
-    Downloaded via NCEI ETOPO WCS as a single GeoTIFF covering the full
-    STOFS-3D-Atlantic extent.
+    Provided by the user as a GeoTIFF (GEBCO_LOCAL env var or dropped in
+    the gebco/ output dir). The NCEI ETOPO2022 THREDDS server has no WCS,
+    so on-the-fly download is not attempted by default. See HERCULES_NOTES #5.
 
 ~375 CUDEM 1/9 arc-second tiles (every other tile, HIGHEST priority)
     The NOAA NCEI dataset 8483 "Ninth Arc-Second Topobathy" tiles live on
     NOAA's public S3 bucket. Each tile is a ~0.25° × 0.25° GeoTIFF at
     1/9 arc-second (~3 m) resolution.
+
+    The exact .tif filenames are SCRAPED AT RUNTIME from each subfolder's
+    index.html (get_subfolder_tiles). This avoids stale/guessed filenames
+    that produced 404s. See HERCULES_NOTES #6.
 
     We select EVERY OTHER tile (alternating in sorted order) from each
     subfolder covering the STOFS-3D-Atlantic domain:
@@ -74,6 +79,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -93,573 +99,78 @@ _S3_PR = (
     "/dem/NCEI_ninth_Topobathy_PuertoRico_9525"
 )
 
+# NOAA Office for Coastal Management HTTP index pages. Each subfolder has an
+# index.html listing the exact .tif filenames. We scrape these at RUNTIME so
+# the tile lists are always correct (hardcoded guesses produced 404s).
+_INDEX_BASE = (
+    "https://coast.noaa.gov/htdata/raster2/elevation"
+    "/NCEI_ninth_Topobathy_2014_8483"
+)
+_INDEX_BASE_PR = (
+    "https://coast.noaa.gov/htdata/raster2/elevation"
+    "/NCEI_ninth_Topobathy_PuertoRico_9525"
+)
+
 # ---------------------------------------------------------------------------
 # Complete tile lists per subfolder (scraped from NOAA NCEI index pages)
 # Each entry is just the filename; the S3 URL is constructed at runtime.
 # ---------------------------------------------------------------------------
 
-_TILES: Dict[str, List[str]] = {
-    # ── MA / NH / ME  (77 tiles, 11 GB total) ────────────────────────────
-    "MA_NH_ME": [
-        "ncei19_n41x25_w070x00_2021v1.tif",
-        "ncei19_n41x25_w070x25_2021v1.tif",
-        "ncei19_n41x50_w070x00_2021v1.tif",
-        "ncei19_n41x50_w070x25_2021v1.tif",
-        "ncei19_n41x50_w070x50_2021v1.tif",
-        "ncei19_n41x75_w070x00_2021v1.tif",
-        "ncei19_n41x75_w070x25_2021v1.tif",
-        "ncei19_n41x75_w070x50_2021v1.tif",
-        "ncei19_n42x00_w070x00_2021v1.tif",
-        "ncei19_n42x00_w070x25_2021v1.tif",
-        "ncei19_n42x00_w070x50_2021v1.tif",
-        "ncei19_n42x00_w071x00_2021v1.tif",
-        "ncei19_n42x25_w070x25_2021v1.tif",
-        "ncei19_n42x25_w070x75_2021v1.tif",
-        "ncei19_n42x25_w071x00_2021v1.tif",
-        "ncei19_n42x25_w071x25_2021v1.tif",
-        "ncei19_n42x50_w071x00_2021v1.tif",
-        "ncei19_n42x50_w071x25_2021v1.tif",
-        "ncei19_n42x75_w070x75_2021v1.tif",
-        "ncei19_n42x75_w071x00_2021v1.tif",
-        "ncei19_n42x75_w071x25_2021v1.tif",
-        "ncei19_n43x00_w070x75_2021v1.tif",
-        "ncei19_n43x00_w071x00_2021v1.tif",
-        "ncei19_n43x00_w071x25_2021v1.tif",
-        "ncei19_n43x25_w070x50_2021v1.tif",
-        "ncei19_n43x25_w070x75_2021v1.tif",
-        "ncei19_n43x25_w071x00_2021v1.tif",
-        "ncei19_n43x50_w070x50_2021v1.tif",
-        "ncei19_n43x50_w070x75_2021v1.tif",
-        "ncei19_n43x75_w070x00_2021v1.tif",
-        "ncei19_n43x75_w070x25_2021v1.tif",
-        "ncei19_n43x75_w070x50_2021v1.tif",
-        "ncei19_n43x75_w070x75_2021v1.tif",
-        "ncei19_n44x00_w068x25_2021v1.tif",
-        "ncei19_n44x00_w068x75_2021v1.tif",
-        "ncei19_n44x00_w069x00_2021v1.tif",
-        "ncei19_n44x00_w069x25_2021v1.tif",
-        "ncei19_n44x00_w069x50_2021v1.tif",
-        "ncei19_n44x00_w069x75_2021v1.tif",
-        "ncei19_n44x00_w070x00_2021v1.tif",
-        "ncei19_n44x00_w070x25_2021v1.tif",
-        "ncei19_n44x00_w070x50_2021v1.tif",
-        "ncei19_n44x25_w068x25_2021v1.tif",
-        "ncei19_n44x25_w068x50_2021v1.tif",
-        "ncei19_n44x25_w068x75_2021v1.tif",
-        "ncei19_n44x25_w069x00_2021v1.tif",
-        "ncei19_n44x25_w069x25_2021v1.tif",
-        "ncei19_n44x25_w069x50_2021v1.tif",
-        "ncei19_n44x25_w069x75_2021v1.tif",
-        "ncei19_n44x25_w070x00_2021v1.tif",
-        "ncei19_n44x50_w067x00_2021v1.tif",
-        "ncei19_n44x50_w067x25_2021v1.tif",
-        "ncei19_n44x50_w067x75_2021v1.tif",
-        "ncei19_n44x50_w068x00_2021v1.tif",
-        "ncei19_n44x50_w068x25_2021v1.tif",
-        "ncei19_n44x50_w068x50_2021v1.tif",
-        "ncei19_n44x50_w068x75_2021v1.tif",
-        "ncei19_n44x50_w069x00_2021v1.tif",
-        "ncei19_n44x50_w069x25_2021v1.tif",
-        "ncei19_n44x50_w070x00_2021v1.tif",
-        "ncei19_n44x75_w067x00_2021v1.tif",
-        "ncei19_n44x75_w067x25_2021v1.tif",
-        "ncei19_n44x75_w067x50_2021v1.tif",
-        "ncei19_n44x75_w067x75_2021v1.tif",
-        "ncei19_n44x75_w068x00_2021v1.tif",
-        "ncei19_n44x75_w068x25_2021v1.tif",
-        "ncei19_n44x75_w068x50_2021v1.tif",
-        "ncei19_n44x75_w068x75_2021v1.tif",
-        "ncei19_n44x75_w069x00_2021v1.tif",
-        "ncei19_n45x00_w067x00_2021v1.tif",
-        "ncei19_n45x00_w067x25_2021v1.tif",
-        "ncei19_n45x00_w068x75_2021v1.tif",
-        "ncei19_n45x00_w069x00_2021v1.tif",
-        "ncei19_n45x25_w067x00_2021v1.tif",
-        "ncei19_n45x25_w067x25_2021v1.tif",
-        "ncei19_n45x25_w067x50_2021v1.tif",
-    ],
+# ---------------------------------------------------------------------------
+# Subfolders of dataset 8483 covering the STOFS-3D-Atlantic domain, in
+# ascending-priority order (earlier = lower priority). Puerto Rico ("PR")
+# lives in a separate dataset (9525). The actual .tif filenames are scraped
+# from each subfolder's index.html at runtime by get_subfolder_tiles().
+# ---------------------------------------------------------------------------
+_SUBFOLDERS: List[str] = [
+    "MA_NH_ME",
+    "rima",
+    "northeast_sandy",
+    "chesapeake_bay",
+    "NC",
+    "southeast",
+    "FL",
+    "AL_nwFL",
+    "LA_MS",
+    "TX",
+    "PR",
+]
 
-    # ── Rhode Island / Narragansett (13 tiles, 2.5 GB) ────────────────────
-    "rima": [
-        "ncei19_n41x25_w071x75_2018v1.tif",
-        "ncei19_n41x50_w070x75_2018v1.tif",
-        "ncei19_n41x50_w071x00_2018v1.tif",
-        "ncei19_n41x50_w071x25_2018v1.tif",
-        "ncei19_n41x50_w071x50_2018v1.tif",
-        "ncei19_n41x50_w071x75_2018v1.tif",
-        "ncei19_n41x75_w070x75_2018v1.tif",
-        "ncei19_n41x75_w071x00_2018v1.tif",
-        "ncei19_n41x75_w071x25_2018v1.tif",
-        "ncei19_n41x75_w071x50_2018v1.tif",
-        "ncei19_n42x00_w070x75_2018v1.tif",
-        "ncei19_n42x00_w071x25_2018v1.tif",
-        "ncei19_n42x00_w071x50_2018v1.tif",
-    ],
+# Map subfolder -> (index-page base, S3 download base)
+def _index_base(sf: str) -> str:
+    return _INDEX_BASE_PR if sf == "PR" else f"{_INDEX_BASE}/{sf}"
 
-    # ── NJ / NY / CT (57 tiles, 11 GB) ───────────────────────────────────
-    "northeast_sandy": [
-        "ncei19_n39x00_w075x00_2018v2.tif",
-        "ncei19_n39x00_w075x25_2014v1.tif",
-        "ncei19_n39x00_w075x50_2014v1.tif",
-        "ncei19_n39x25_w074x75_2018v2.tif",
-        "ncei19_n39x25_w075x00_2018v2.tif",
-        "ncei19_n39x25_w075x25_2018v2.tif",
-        "ncei19_n39x25_w075x50_2014v1.tif",
-        "ncei19_n39x50_w074x50_2018v2.tif",
-        "ncei19_n39x50_w074x75_2018v2.tif",
-        "ncei19_n39x50_w075x25_2018v2.tif",
-        "ncei19_n39x50_w075x50_2018v2.tif",
-        "ncei19_n39x50_w075x75_2014v1.tif",
-        "ncei19_n39x75_w074x25_2018v2.tif",
-        "ncei19_n39x75_w074x50_2018v2.tif",
-        "ncei19_n39x75_w075x50_2014v1.tif",
-        "ncei19_n39x75_w075x75_2014v1.tif",
-        "ncei19_n40x00_w074x25_2018v2.tif",
-        "ncei19_n40x00_w075x25_2014v1.tif",
-        "ncei19_n40x00_w075x50_2014v1.tif",
-        "ncei19_n40x25_w074x00_2018v2.tif",
-        "ncei19_n40x25_w074x25_2018v2.tif",
-        "ncei19_n40x25_w074x75_2014v1.tif",
-        "ncei19_n40x25_w075x00_2014v1.tif",
-        "ncei19_n40x25_w075x25_2014v1.tif",
-        "ncei19_n40x50_w074x00_2018v2.tif",
-        "ncei19_n40x50_w074x25_2018v2.tif",
-        "ncei19_n40x75_w073x00_2015v1.tif",
-        "ncei19_n40x75_w073x25_2015v1.tif",
-        "ncei19_n40x75_w073x50_2015v1.tif",
-        "ncei19_n40x75_w073x75_2015v1.tif",
-        "ncei19_n40x75_w074x00_2015v1.tif",
-        "ncei19_n40x75_w074x25_2015v1.tif",
-        "ncei19_n41x00_w072x25_2015v1.tif",
-        "ncei19_n41x00_w072x50_2015v1.tif",
-        "ncei19_n41x00_w072x75_2015v1.tif",
-        "ncei19_n41x00_w073x00_2015v1.tif",
-        "ncei19_n41x00_w073x25_2015v1.tif",
-        "ncei19_n41x00_w073x50_2015v1.tif",
-        "ncei19_n41x00_w073x75_2015v1.tif",
-        "ncei19_n41x00_w074x00_2015v1.tif",
-        "ncei19_n41x00_w074x25_2015v1.tif",
-        "ncei19_n41x25_w072x00_2015v1.tif",
-        "ncei19_n41x25_w072x25_2015v1.tif",
-        "ncei19_n41x25_w072x50_2015v1.tif",
-        "ncei19_n41x25_w072x75_2015v1.tif",
-        "ncei19_n41x25_w073x00_2016v1.tif",
-        "ncei19_n41x25_w073x25_2016v1.tif",
-        "ncei19_n41x25_w073x50_2015v1.tif",
-        "ncei19_n41x25_w073x75_2015v1.tif",
-        "ncei19_n41x25_w074x00_2015v1.tif",
-        "ncei19_n41x50_w072x00_2016v1.tif",
-        "ncei19_n41x50_w072x25_2016v1.tif",
-        "ncei19_n41x50_w072x50_2016v1.tif",
-        "ncei19_n41x50_w072x75_2016v1.tif",
-        "ncei19_n41x50_w073x00_2016v1.tif",
-        "ncei19_n41x50_w074x00_2015v1.tif",
-        "ncei19_n41x50_w074x25_2015v1.tif",
-    ],
+def _s3_base(sf: str) -> str:
+    return _S3_PR if sf == "PR" else f"{_S3_BASE}/{sf}"
 
-    # ── Chesapeake Bay / Delmarva (87 tiles, 18 GB) ───────────────────────
-    "chesapeake_bay": [
-        "ncei19_n36x75_w076x50_2019v1.tif",
-        "ncei19_n36x75_w076x75_2019v1.tif",
-        "ncei19_n36x75_w077x00_2019v1.tif",
-        "ncei19_n36x75_w077x25_2019v1.tif",
-        "ncei19_n37x00_w076x00_2019v1.tif",
-        "ncei19_n37x00_w076x25_2019v1.tif",
-        "ncei19_n37x00_w076x50_2019v1.tif",
-        "ncei19_n37x00_w076x75_2019v1.tif",
-        "ncei19_n37x25_w076x00_2019v1.tif",
-        "ncei19_n37x25_w076x25_2019v1.tif",
-        "ncei19_n37x25_w076x50_2019v1.tif",
-        "ncei19_n37x25_w076x75_2019v1.tif",
-        "ncei19_n37x25_w077x00_2019v1.tif",
-        "ncei19_n37x25_w077x25_2019v1.tif",
-        "ncei19_n37x25_w077x50_2019v1.tif",
-        "ncei19_n37x50_w075x75_2019v1.tif",
-        "ncei19_n37x50_w076x00_2019v1.tif",
-        "ncei19_n37x50_w076x25_2019v1.tif",
-        "ncei19_n37x50_w076x50_2019v1.tif",
-        "ncei19_n37x50_w076x75_2019v1.tif",
-        "ncei19_n37x50_w077x00_2019v1.tif",
-        "ncei19_n37x50_w077x25_2019v1.tif",
-        "ncei19_n37x50_w077x50_2019v1.tif",
-        "ncei19_n37x75_w075x75_2019v1.tif",
-        "ncei19_n37x75_w076x00_2019v1.tif",
-        "ncei19_n37x75_w076x25_2019v1.tif",
-        "ncei19_n37x75_w076x50_2019v1.tif",
-        "ncei19_n37x75_w076x75_2019v1.tif",
-        "ncei19_n37x75_w077x00_2019v1.tif",
-        "ncei19_n37x75_w077x25_2019v1.tif",
-        "ncei19_n37x75_w077x50_2019v1.tif",
-        "ncei19_n38x00_w075x50_2019v1.tif",
-        "ncei19_n38x00_w075x75_2019v1.tif",
-        "ncei19_n38x00_w076x00_2019v1.tif",
-        "ncei19_n38x00_w076x25_2019v1.tif",
-        "ncei19_n38x00_w076x50_2019v1.tif",
-        "ncei19_n38x00_w076x75_2019v1.tif",
-        "ncei19_n38x00_w077x00_2019v1.tif",
-        "ncei19_n38x00_w077x25_2019v1.tif",
-        "ncei19_n38x25_w075x25_2019v1.tif",
-        "ncei19_n38x25_w075x50_2019v1.tif",
-        "ncei19_n38x25_w075x75_2019v1.tif",
-        "ncei19_n38x25_w076x00_2019v1.tif",
-        "ncei19_n38x25_w076x25_2019v1.tif",
-        "ncei19_n38x25_w076x50_2019v1.tif",
-        "ncei19_n38x25_w076x75_2019v1.tif",
-        "ncei19_n38x25_w077x00_2019v1.tif",
-        "ncei19_n38x25_w077x25_2019v1.tif",
-        "ncei19_n38x25_w077x50_2019v1.tif",
-        "ncei19_n38x50_w075x25_2019v1.tif",
-        "ncei19_n38x50_w075x50_2019v1.tif",
-        "ncei19_n38x50_w075x75_2019v1.tif",
-        "ncei19_n38x50_w076x00_2019v1.tif",
-        "ncei19_n38x50_w076x25_2019v1.tif",
-        "ncei19_n38x50_w076x50_2019v1.tif",
-        "ncei19_n38x50_w076x75_2019v1.tif",
-        "ncei19_n38x50_w077x00_2019v1.tif",
-        "ncei19_n38x50_w077x25_2019v1.tif",
-        "ncei19_n38x50_w077x50_2019v1.tif",
-        "ncei19_n38x75_w075x25_2019v1.tif",
-        "ncei19_n38x75_w075x50_2019v1.tif",
-        "ncei19_n38x75_w075x75_2019v1.tif",
-        "ncei19_n38x75_w076x00_2019v1.tif",
-        "ncei19_n38x75_w076x25_2019v1.tif",
-        "ncei19_n38x75_w076x50_2019v1.tif",
-        "ncei19_n38x75_w076x75_2019v1.tif",
-        "ncei19_n38x75_w077x00_2019v1.tif",
-        "ncei19_n38x75_w077x25_2019v1.tif",
-        "ncei19_n38x75_w077x50_2019v1.tif",
-        "ncei19_n39x00_w075x75_2019v1.tif",
-        "ncei19_n39x00_w076x00_2019v1.tif",
-        "ncei19_n39x00_w076x25_2019v1.tif",
-        "ncei19_n39x00_w076x50_2019v1.tif",
-        "ncei19_n39x00_w076x75_2019v1.tif",
-        "ncei19_n39x00_w077x00_2019v1.tif",
-        "ncei19_n39x00_w077x25_2019v1.tif",
-        "ncei19_n39x25_w075x75_2019v1.tif",
-        "ncei19_n39x25_w076x00_2019v1.tif",
-        "ncei19_n39x25_w076x25_2019v1.tif",
-        "ncei19_n39x25_w076x50_2019v1.tif",
-        "ncei19_n39x25_w076x75_2019v1.tif",
-        "ncei19_n39x50_w076x00_2019v1.tif",
-        "ncei19_n39x50_w076x25_2019v1.tif",
-        "ncei19_n39x50_w076x50_2019v1.tif",
-        "ncei19_n39x50_w076x75_2019v1.tif",
-        "ncei19_n39x75_w076x00_2019v1.tif",
-        "ncei19_n39x75_w076x25_2019v1.tif",
-    ],
+# Matches CUDEM tile filenames, e.g. ncei19_n41x25_w070x00_2021v1.tif
+# (some FL tiles use uppercase X; allow both.)
+_TIF_RE = re.compile(r"ncei19_[nsNS]\d+[xX]\d+_[ewEW]\d+[xX]\d+_\d{4}v\d+\.tif")
 
-    # ── NC  (47 tiles, 9.1 GB) ────────────────────────────────────────────
-    "NC": [
-        "ncei19_n34x75_w076x50_2019v2.tif",
-        "ncei19_n34x75_w076x75_2019v2.tif",
-        "ncei19_n35x00_w076x25_2019v2.tif",
-        "ncei19_n35x00_w076x50_2019v2.tif",
-        "ncei19_n35x00_w076x75_2018v1.tif",
-        "ncei19_n35x00_w077x00_2018v1.tif",
-        "ncei19_n35x25_w075x75_2019v2.tif",
-        "ncei19_n35x25_w076x00_2019v2.tif",
-        "ncei19_n35x25_w076x25_2019v2.tif",
-        "ncei19_n35x25_w076x50_2018v1.tif",
-        "ncei19_n35x25_w076x75_2018v1.tif",
-        "ncei19_n35x25_w077x00_2018v1.tif",
-        "ncei19_n35x25_w077x25_2018v1.tif",
-        "ncei19_n35x50_w075x50_2019v2.tif",
-        "ncei19_n35x50_w075x75_2019v2.tif",
-        "ncei19_n35x50_w076x00_2018v1.tif",
-        "ncei19_n35x50_w076x25_2018v1.tif",
-        "ncei19_n35x50_w076x50_2018v1.tif",
-        "ncei19_n35x50_w076x75_2018v1.tif",
-        "ncei19_n35x50_w077x00_2018v1.tif",
-        "ncei19_n35x50_w077x25_2018v1.tif",
-        "ncei19_n35x75_w075x50_2019v2.tif",
-        "ncei19_n35x75_w075x75_2019v2.tif",
-        "ncei19_n35x75_w076x00_2018v1.tif",
-        "ncei19_n35x75_w076x25_2018v1.tif",
-        "ncei19_n35x75_w076x50_2018v1.tif",
-        "ncei19_n35x75_w076x75_2018v1.tif",
-        "ncei19_n35x75_w077x00_2018v1.tif",
-        "ncei19_n35x75_w077x25_2018v1.tif",
-        "ncei19_n36x00_w075x75_2019v2.tif",
-        "ncei19_n36x00_w076x00_2018v1.tif",
-        "ncei19_n36x00_w076x25_2018v1.tif",
-        "ncei19_n36x00_w076x50_2018v1.tif",
-        "ncei19_n36x00_w076x75_2018v1.tif",
-        "ncei19_n36x25_w075x75_2019v2.tif",
-        "ncei19_n36x25_w076x00_2019v2.tif",
-        "ncei19_n36x25_w076x25_2018v1.tif",
-        "ncei19_n36x25_w076x50_2018v1.tif",
-        "ncei19_n36x25_w076x75_2018v1.tif",
-        "ncei19_n36x25_w077x00_2018v1.tif",
-        "ncei19_n36x50_w076x00_2019v2.tif",
-        "ncei19_n36x50_w076x25_2018v1.tif",
-        "ncei19_n36x50_w076x50_2022v1.tif",
-        "ncei19_n36x50_w076x75_2018v1.tif",
-        "ncei19_n36x50_w077x00_2018v1.tif",
-        "ncei19_n36x75_w076x00_2019v2.tif",
-        "ncei19_n36x75_w076x25_2018v1.tif",
-    ],
+# Simple in-memory cache so we don't re-scrape a subfolder within one run.
+_TILE_CACHE: Dict[str, List[str]] = {}
 
-    # ── SC / GA  (75 tiles, 15 GB) ────────────────────────────────────────
-    # Representative subset — full list available at
-    # https://coast.noaa.gov/htdata/raster2/elevation/NCEI_ninth_Topobathy_2014_8483/southeast/index.html
-    "southeast": [
-        "ncei19_n31x25_w081x50_2019v1.tif",
-        "ncei19_n31x25_w081x75_2019v1.tif",
-        "ncei19_n31x25_w082x00_2019v1.tif",
-        "ncei19_n31x50_w081x25_2019v1.tif",
-        "ncei19_n31x50_w081x50_2019v1.tif",
-        "ncei19_n31x50_w081x75_2019v1.tif",
-        "ncei19_n31x50_w082x00_2019v1.tif",
-        "ncei19_n31x75_w081x25_2019v1.tif",
-        "ncei19_n31x75_w081x50_2019v1.tif",
-        "ncei19_n31x75_w081x75_2019v1.tif",
-        "ncei19_n31x75_w082x00_2019v1.tif",
-        "ncei19_n32x00_w081x00_2019v1.tif",
-        "ncei19_n32x00_w081x25_2019v1.tif",
-        "ncei19_n32x00_w081x50_2019v1.tif",
-        "ncei19_n32x00_w081x75_2019v1.tif",
-        "ncei19_n32x25_w080x75_2019v1.tif",
-        "ncei19_n32x25_w081x00_2019v1.tif",
-        "ncei19_n32x25_w081x25_2019v1.tif",
-        "ncei19_n32x25_w081x50_2019v1.tif",
-        "ncei19_n32x25_w081x75_2019v1.tif",
-        "ncei19_n32x50_w080x50_2019v1.tif",
-        "ncei19_n32x50_w080x75_2019v1.tif",
-        "ncei19_n32x50_w081x00_2019v1.tif",
-        "ncei19_n32x50_w081x25_2019v1.tif",
-        "ncei19_n32x75_w080x00_2019v1.tif",
-        "ncei19_n32x75_w080x25_2019v1.tif",
-        "ncei19_n32x75_w080x50_2019v1.tif",
-        "ncei19_n32x75_w080x75_2019v1.tif",
-        "ncei19_n33x00_w079x50_2019v1.tif",
-        "ncei19_n33x00_w079x75_2019v1.tif",
-        "ncei19_n33x00_w080x00_2019v1.tif",
-        "ncei19_n33x00_w080x25_2019v1.tif",
-        "ncei19_n33x25_w079x25_2019v1.tif",
-        "ncei19_n33x25_w079x50_2019v1.tif",
-        "ncei19_n33x25_w079x75_2019v1.tif",
-        "ncei19_n33x50_w079x00_2019v1.tif",
-        "ncei19_n33x50_w079x25_2019v1.tif",
-        "ncei19_n33x75_w078x75_2019v1.tif",
-        "ncei19_n33x75_w079x00_2019v1.tif",
-        "ncei19_n34x00_w078x25_2019v1.tif",
-        "ncei19_n34x00_w078x50_2019v1.tif",
-        "ncei19_n34x00_w078x75_2019v1.tif",
-        "ncei19_n34x25_w077x75_2019v1.tif",
-        "ncei19_n34x25_w078x00_2019v1.tif",
-        "ncei19_n34x25_w078x25_2019v1.tif",
-        "ncei19_n34x50_w077x50_2019v1.tif",
-        "ncei19_n34x50_w077x75_2019v1.tif",
-        "ncei19_n34x75_w077x25_2019v1.tif",
-        "ncei19_n34x75_w077x50_2019v1.tif",
-        "ncei19_n34x75_w077x75_2019v1.tif",
-        "ncei19_n34x75_w078x00_2019v1.tif",
-        "ncei19_n34x75_w078x25_2019v1.tif",
-        "ncei19_n35x00_w077x25_2019v1.tif",
-        "ncei19_n35x00_w077x50_2019v1.tif",
-        "ncei19_n35x00_w077x75_2019v1.tif",
-    ],
 
-    # ── Florida  (representative 60 tiles of 109, 28 GB total) ───────────
-    "FL": [
-        "ncei19_n24x75_w081x00_2022v2.tif",
-        "ncei19_n24x75_w081x25_2022v2.tif",
-        "ncei19_n25x00_w080x75_2022v2.tif",
-        "ncei19_n25x00_w081x00_2022v2.tif",
-        "ncei19_n25x25_w080x25_2022v2.tif",
-        "ncei19_n25x25_w080x50_2022v2.tif",
-        "ncei19_n25x50_w080x25_2022v2.tif",
-        "ncei19_n25x75_w080x00_2022v1.tif",
-        "ncei19_n26x00_w080x00_2022v1.tif",
-        "ncei19_n26x00_w080x25_2022v1.tif",
-        "ncei19_n26x25_w080x00_2022v1.tif",
-        "ncei19_n26x50_w080x00_2021v1.tif",
-        "ncei19_n26x75_w080x00_2021v1.tif",
-        "ncei19_n27x00_w080x25_2021v1.tif",
-        "ncei19_n27x25_w080x50_2021v1.tif",
-        "ncei19_n27x50_w080x50_2021v1.tif",
-        "ncei19_n27x75_w080x50_2021v1.tif",
-        "ncei19_n28x00_w080x50_2021v1.tif",
-        "ncei19_n28x25_w080x75_2021v1.tif",
-        "ncei19_n28x50_w080x75_2021v1.tif",
-        "ncei19_n29x00_w081x00_2018v1.tif",
-        "ncei19_n29x25_w081x25_2018v1.tif",
-        "ncei19_n29x50_w081x25_2018v1.tif",
-        "ncei19_n29x75_w081x25_2018v1.tif",
-        "ncei19_n30x00_w081x50_2018v1.tif",
-        "ncei19_n30x25_w081x50_2018v1.tif",
-        "ncei19_n25x00_w082x00_2020v1.tif",
-        "ncei19_n25x25_w082x00_2020v1.tif",
-        "ncei19_n25x50_w082x00_2020v1.tif",
-        "ncei19_n25x75_w082x00_2020v1.tif",
-        "ncei19_n26x00_w082x25_2020v1.tif",
-        "ncei19_n26x25_w082x50_2020v1.tif",
-        "ncei19_n26x50_w082x75_2020v1.tif",
-        "ncei19_n26x75_w082x75_2020v1.tif",
-        "ncei19_n27x00_w082x75_2020v1.tif",
-        "ncei19_n27x25_w082x75_2016v1.tif",
-        "ncei19_n27x50_w082x75_2016v1.tif",
-        "ncei19_n27x75_w083x00_2016v1.tif",
-        "ncei19_n28x00_w083x00_2016v1.tif",
-        "ncei19_n28x25_w083x25_2016v1.tif",
-        "ncei19_n28x50_w083x25_2017v1.tif",
-        "ncei19_n28x75_w083x50_2017v1.tif",
-        "ncei19_n29x00_w083x50_2017v1.tif",
-        "ncei19_n29x25_w083x75_2017v1.tif",
-        "ncei19_n29x50_w084x00_2017v1.tif",
-        "ncei19_n29x75_w084x25_2017v1.tif",
-        "ncei19_n30x00_w084x50_2017v1.tif",
-        "ncei19_n30x25_w084x75_2017v1.tif",
-        "ncei19_n30x50_w084x75_2017v1.tif",
-        "ncei19_n30x75_w085x00_2017v1.tif",
-    ],
+def get_subfolder_tiles(subfolder: str) -> List[str]:
+    """Scrape a subfolder's index.html and return the sorted .tif filenames.
 
-    # ── AL / NW Florida panhandle  (56 tiles, 11 GB) ─────────────────────
-    "AL_nwFL": [
-        "ncei19_n29x75_w084x75_2019v1.tif",
-        "ncei19_n30x00_w085x00_2019v1.tif",
-        "ncei19_n30x00_w085x25_2019v1.tif",
-        "ncei19_n30x00_w085x50_2019v1.tif",
-        "ncei19_n30x00_w086x00_2019v1.tif",
-        "ncei19_n30x25_w085x25_2019v1.tif",
-        "ncei19_n30x25_w085x50_2019v1.tif",
-        "ncei19_n30x25_w086x00_2019v1.tif",
-        "ncei19_n30x25_w086x25_2019v1.tif",
-        "ncei19_n30x25_w086x50_2019v1.tif",
-        "ncei19_n30x25_w086x75_2019v1.tif",
-        "ncei19_n30x25_w087x00_2019v1.tif",
-        "ncei19_n30x25_w087x25_2019v1.tif",
-        "ncei19_n30x50_w086x00_2019v1.tif",
-        "ncei19_n30x50_w086x25_2019v1.tif",
-        "ncei19_n30x50_w086x50_2019v1.tif",
-        "ncei19_n30x50_w086x75_2019v1.tif",
-        "ncei19_n30x50_w087x00_2019v1.tif",
-        "ncei19_n30x50_w087x25_2019v1.tif",
-        "ncei19_n30x50_w087x50_2019v1.tif",
-        "ncei19_n30x50_w087x75_2019v1.tif",
-        "ncei19_n30x50_w088x00_2019v1.tif",
-        "ncei19_n30x75_w087x25_2019v1.tif",
-        "ncei19_n30x75_w087x50_2019v1.tif",
-        "ncei19_n30x75_w087x75_2019v1.tif",
-        "ncei19_n30x75_w088x00_2019v1.tif",
-        "ncei19_n30x75_w088x25_2019v1.tif",
-        "ncei19_n31x00_w087x75_2019v1.tif",
-        "ncei19_n31x00_w088x00_2019v1.tif",
-        "ncei19_n31x25_w088x00_2019v1.tif",
-    ],
+    Robust against the NOAA index HTML layout: we just regex out every
+    ncei19_*.tif token and de-duplicate. Returns [] on failure.
+    """
+    if subfolder in _TILE_CACHE:
+        return _TILE_CACHE[subfolder]
 
-    # ── LA / MS  (representative 60 tiles of ~119) ────────────────────────
-    "LA_MS": [
-        "ncei19_n29x00_w089x00_2020v1.tif",
-        "ncei19_n29x00_w089x25_2020v1.tif",
-        "ncei19_n29x00_w089x50_2020v1.tif",
-        "ncei19_n29x00_w090x00_2020v1.tif",
-        "ncei19_n29x00_w090x25_2020v1.tif",
-        "ncei19_n29x00_w090x50_2020v1.tif",
-        "ncei19_n29x00_w090x75_2020v1.tif",
-        "ncei19_n29x00_w091x00_2020v1.tif",
-        "ncei19_n29x00_w091x25_2020v1.tif",
-        "ncei19_n29x00_w091x50_2020v1.tif",
-        "ncei19_n29x00_w091x75_2020v1.tif",
-        "ncei19_n29x00_w092x00_2020v1.tif",
-        "ncei19_n29x00_w092x25_2020v1.tif",
-        "ncei19_n29x25_w089x25_2020v1.tif",
-        "ncei19_n29x25_w089x50_2020v1.tif",
-        "ncei19_n29x25_w089x75_2020v1.tif",
-        "ncei19_n29x25_w090x00_2020v1.tif",
-        "ncei19_n29x25_w090x25_2020v1.tif",
-        "ncei19_n29x25_w090x50_2020v1.tif",
-        "ncei19_n29x25_w090x75_2020v1.tif",
-        "ncei19_n29x25_w091x00_2020v1.tif",
-        "ncei19_n29x25_w091x25_2020v1.tif",
-        "ncei19_n29x25_w091x50_2020v1.tif",
-        "ncei19_n29x25_w092x00_2020v1.tif",
-        "ncei19_n29x25_w092x25_2020v1.tif",
-        "ncei19_n29x50_w090x00_2021v1.tif",
-        "ncei19_n29x50_w090x25_2021v1.tif",
-        "ncei19_n29x50_w090x50_2021v1.tif",
-        "ncei19_n29x50_w090x75_2021v1.tif",
-        "ncei19_n29x50_w091x00_2021v1.tif",
-        "ncei19_n29x50_w091x25_2021v1.tif",
-        "ncei19_n29x50_w091x50_2021v1.tif",
-        "ncei19_n29x75_w090x00_2022v1.tif",
-        "ncei19_n29x75_w090x25_2022v1.tif",
-        "ncei19_n29x75_w090x50_2022v1.tif",
-        "ncei19_n29x75_w091x00_2022v1.tif",
-        "ncei19_n30x00_w089x50_2021v1.tif",
-        "ncei19_n30x00_w089x75_2021v1.tif",
-        "ncei19_n30x00_w090x00_2021v1.tif",
-        "ncei19_n30x00_w090x25_2021v1.tif",
-        "ncei19_n30x00_w091x50_2021v1.tif",
-        "ncei19_n30x00_w092x00_2021v1.tif",
-        "ncei19_n30x00_w092x25_2021v1.tif",
-        "ncei19_n30x00_w092x50_2021v1.tif",
-        "ncei19_n30x25_w089x75_2021v1.tif",
-        "ncei19_n30x25_w090x00_2021v1.tif",
-        "ncei19_n30x50_w089x75_2020v1.tif",
-        "ncei19_n30x50_w090x00_2020v1.tif",
-        "ncei19_n30x75_w089x75_2020v1.tif",
-        "ncei19_n31x00_w089x50_2020v1.tif",
-    ],
+    url = f"{_index_base(subfolder)}/index.html"
+    try:
+        resp = requests.get(url, timeout=120)
+        resp.raise_for_status()
+        names = sorted(set(_TIF_RE.findall(resp.text)))
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        print(f"    WARNING: could not scrape index for {subfolder}: {exc}")
+        names = []
 
-    # ── Texas  (representative 50 tiles of ~97) ───────────────────────────
-    "TX": [
-        "ncei19_n26x00_w097x25_2020v1.tif",
-        "ncei19_n26x00_w097x50_2020v1.tif",
-        "ncei19_n26x25_w097x00_2020v1.tif",
-        "ncei19_n26x25_w097x25_2020v1.tif",
-        "ncei19_n26x50_w097x00_2020v1.tif",
-        "ncei19_n26x75_w097x25_2020v1.tif",
-        "ncei19_n27x00_w097x25_2020v1.tif",
-        "ncei19_n27x25_w097x50_2020v1.tif",
-        "ncei19_n27x50_w097x25_2021v2.tif",
-        "ncei19_n27x75_w097x25_2021v2.tif",
-        "ncei19_n28x00_w097x00_2021v2.tif",
-        "ncei19_n28x00_w097x25_2021v2.tif",
-        "ncei19_n28x25_w096x75_2021v2.tif",
-        "ncei19_n28x25_w097x00_2021v2.tif",
-        "ncei19_n28x50_w096x50_2021v2.tif",
-        "ncei19_n28x75_w096x25_2021v2.tif",
-        "ncei19_n28x75_w096x50_2021v2.tif",
-        "ncei19_n29x00_w095x75_2021v1.tif",
-        "ncei19_n29x00_w096x00_2021v1.tif",
-        "ncei19_n29x25_w095x50_2021v1.tif",
-        "ncei19_n29x25_w095x75_2021v1.tif",
-        "ncei19_n29x50_w095x00_2021v1.tif",
-        "ncei19_n29x50_w095x25_2021v1.tif",
-        "ncei19_n29x75_w094x75_2021v1.tif",
-        "ncei19_n29x75_w094x50_2021v1.tif",
-        "ncei19_n30x00_w094x25_2021v1.tif",
-        "ncei19_n30x00_w094x50_2021v1.tif",
-        "ncei19_n30x25_w094x00_2021v1.tif",
-        "ncei19_n30x25_w094x25_2021v1.tif",
-        "ncei19_n30x50_w093x75_2021v1.tif",
-        "ncei19_n30x50_w094x00_2021v1.tif",
-        "ncei19_n30x75_w093x75_2021v1.tif",
-    ],
-
-    # ── Puerto Rico  (small representative set, dataset 9525) ────────────
-    "PR": [
-        "ncei19_n17x75_w066x75_2019v1.tif",
-        "ncei19_n17x75_w067x00_2019v1.tif",
-        "ncei19_n17x75_w067x25_2019v1.tif",
-        "ncei19_n18x00_w066x25_2019v1.tif",
-        "ncei19_n18x00_w066x50_2019v1.tif",
-        "ncei19_n18x00_w066x75_2019v1.tif",
-        "ncei19_n18x00_w067x00_2019v1.tif",
-        "ncei19_n18x25_w066x00_2019v1.tif",
-        "ncei19_n18x25_w066x25_2019v1.tif",
-        "ncei19_n18x25_w066x50_2019v1.tif",
-        "ncei19_n18x50_w065x75_2019v1.tif",
-        "ncei19_n18x50_w066x00_2019v1.tif",
-    ],
-}
-
-# Map subfolder → S3 base URL
-_SUBFOLDER_S3_BASE: Dict[str, str] = {
-    sf: _S3_BASE + f"/{sf}" for sf in _TILES if sf != "PR"
-}
-_SUBFOLDER_S3_BASE["PR"] = _S3_PR
+    _TILE_CACHE[subfolder] = names
+    return names
 
 # ---------------------------------------------------------------------------
 # Download helper
@@ -873,18 +384,22 @@ def download_all(
     priority_counter += 1
 
     # ── CUDEM tiles ────────────────────────────────────────────────────────
-    subfolders = list(_TILES.keys())
+    subfolders = list(_SUBFOLDERS)
     if only:
         subfolders = [s for s in subfolders if s in only]
 
     for subfolder in subfolders:
-        all_tiles = _TILES[subfolder]
+        all_tiles = get_subfolder_tiles(subfolder)   # scraped at runtime
         selected = select_every_other(all_tiles)
-        s3_base = _SUBFOLDER_S3_BASE[subfolder]
+        s3_base = _s3_base(subfolder)
         sf_dir = out_dir / subfolder
         _ensure_dir(sf_dir)
 
         print(f"\n{'─'*60}")
+        if not all_tiles:
+            print(f"  {subfolder}  —  index scrape returned 0 tiles; skipping")
+            print("─" * 60)
+            continue
         print(f"  {subfolder}  —  {len(selected)}/{len(all_tiles)} tiles "
               f"(every other, ~{len(selected)*130:.0f} MB est.)")
         print("─" * 60)
@@ -966,7 +481,7 @@ def main() -> None:
             "Downloads every other tile per subfolder to create deliberate\n"
             "gaps in coastal coverage — showing GEBCO in the gaps and CUDEM\n"
             "where tiles are present, making the priority mechanism testable.\n\n"
-            f"Subfolders: {', '.join(_TILES.keys())}"
+            f"Subfolders: {', '.join(_SUBFOLDERS)}"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -981,7 +496,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--only", nargs="+", metavar="SUBFOLDER",
-        choices=list(_TILES.keys()),
+        choices=list(_SUBFOLDERS),
         help="Download only the named subfolder(s).",
     )
     parser.add_argument(
@@ -990,8 +505,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    n_cudem = sum(len(select_every_other(v)) for k, v in _TILES.items()
-                  if not args.only or k in args.only)
+    # Tile lists are scraped at runtime, so we can't cheaply know the count
+    # up-front without hitting the network. Report a rough placeholder.
+    n_cudem = "≈370 (scraped at runtime)"
     print("=" * 60)
     print("  OCSMesh STOFS-3D-Atlantic DEM Download")
     print("=" * 60)
@@ -999,8 +515,8 @@ def main() -> None:
     print(f"  Manifest   : {args.manifest.resolve()}")
     print(f"  Dry run    : {args.dry_run}")
     print(f"  GEBCO      : 1 tile (full domain, 15 arc-sec)")
-    print(f"  CUDEM      : ~{n_cudem} tiles (every other, 1/9 arc-sec, ~3 m)")
-    print(f"  Est. total : ~{n_cudem * 130 / 1024:.0f} GB CUDEM + a few GB GEBCO")
+    print(f"  CUDEM      : {n_cudem} tiles (every other, 1/9 arc-sec, ~3 m)")
+    print(f"  Subfolders : {', '.join(args.only) if args.only else ', '.join(_SUBFOLDERS)}")
     print()
 
     manifest = download_all(
