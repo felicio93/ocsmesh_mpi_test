@@ -153,6 +153,50 @@ docs can cite a known-good Hercules launch recipe.
 
 ---
 
+## #5 — ETOPO2022 THREDDS WCS returns HTTP 400 (no WCS for that dataset)
+
+**Symptom**
+`download_dems.py` GEBCO step fails on every attempt:
+```
+400 Client Error: 400 for url:
+https://www.ngdc.noaa.gov/thredds/wcs/global/etopo2022/ETOPO_2022_v1_15s_N90W180_bed.nc?...WCS...
+WARNING: GEBCO download failed.
+```
+
+**Root cause**
+The NCEI THREDDS server does NOT expose a WCS service for the ETOPO2022
+global dataset (and the single global `N90W180` NetCDF the URL assumed
+does not exist there). The dataset is served as **per-tile 15° NetCDF
+files** via fileServer / OPeNDAP / NCSS only — not WCS. So the WCS
+`GetCoverage` request is invalid and returns 400.
+
+Confirmed catalog layout:
+```
+/thredds/catalog/global/ETOPO2022/15s/15s_bed_elev_netcdf/catalog.html
+  -> ETOPO_2022_v1_15s_N60W105_bed.nc, ...N60W090..., etc. (15°x15° tiles)
+Plain-file download base:
+  /thredds/fileServer/global/ETOPO2022/15s/15s_bed_elev_netcdf/<tile>.nc
+```
+
+**Workaround (recommended)**
+Provide the deep-ocean background GeoTIFF yourself — no WCS needed:
+
+1. Download a GEBCO grid for the domain from https://download.gebco.net/
+   (GeoTIFF), e.g. `gebco_2024_n56.0_s5.0_w-100.0_e-50.0.tif`.
+2. Drop it in `$DEMS/gebco/` OR set `GEBCO_LOCAL` to its full path:
+   ```bash
+   export GEBCO_LOCAL=$DEMS/gebco/gebco_2024_n56.0_s5.0_w-100.0_e-50.0.tif
+   ```
+`download_dems.py` now (a) honors `GEBCO_LOCAL`, (b) auto-detects any
+`*.tif` already sitting in `$DEMS/gebco/`, and only then (c) falls back
+to downloading + merging the ETOPO2022 15" NetCDF tiles with rasterio.
+
+**OCSMesh-side?**
+No — this is a data-sourcing issue in the benchmark's download helper,
+now fixed. Not an OCSMesh code concern.
+
+---
+
 ## Template for new entries
 
 ```

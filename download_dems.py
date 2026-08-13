@@ -696,47 +696,122 @@ def _download_file(url: str, dest: Path,
 # ---------------------------------------------------------------------------
 
 def download_gebco(out_dir: Path) -> Optional[Path]:
-    """Download GEBCO/ETOPO 2022 for the full STOFS-3D-Atlantic domain."""
+    """Provide the GEBCO/ETOPO deep-ocean background GeoTIFF.
+
+    Resolution order:
+      1. GEBCO_LOCAL env var, if set and the file exists.
+      2. Any existing *.tif already sitting in the gebco/ output dir
+         (e.g. a GEBCO grid you downloaded manually from
+         https://download.gebco.net/). This is the recommended path —
+         the NCEI ETOPO2022 THREDDS server does NOT expose WCS, so the
+         old on-the-fly WCS download does not work (returns HTTP 400).
+         See HERCULES_NOTES.md #5.
+      3. Fallback: download + merge the ETOPO2022 15" NetCDF tiles that
+         cover the domain (requires rasterio; large-ish).
+
+    Returns the path to the GeoTIFF, or None if nothing could be provided.
+    """
+    # 1. Explicit override
     local = os.environ.get("GEBCO_LOCAL")
     if local and Path(local).exists():
-        print(f"  Using local GEBCO file: {local}")
+        print(f"  Using GEBCO_LOCAL: {local}")
         return Path(local)
 
-    dest = out_dir / "stofs_atlantic_gebco.tif"
-    if dest.exists():
-        print(f"  {dest.name} already exists — skipping.")
-        return dest
-
-    print("  Downloading GEBCO/ETOPO 2022 (15 arc-sec, full domain) ...")
-
-    # NCEI ETOPO 2022 WCS (GEBCO-based)
-    wcs = "https://www.ngdc.noaa.gov/thredds/wcs/global/etopo2022/ETOPO_2022_v1_15s_N90W180_bed.nc"
-    bbox = "-100.0,-5.0,-50.0,47.0"   # wider than domain for overlap
-    params = {
-        "SERVICE": "WCS", "VERSION": "1.0.0", "REQUEST": "GetCoverage",
-        "COVERAGE": "Band1", "BBOX": bbox,
-        "CRS": "EPSG:4326", "RESPONSE_CRS": "EPSG:4326",
-        "FORMAT": "GeoTIFF",
-        "RESX": "0.00417",   # 15 arc-sec ≈ 0.00417°
-        "RESY": "0.00417",
-    }
-    if _download_file(
-        requests.Request("GET", wcs, params=params).prepare().url,
-        dest
-    ):
-        return dest
-
-    # Simple fallback: assemble URL manually
-    url = (
-        f"{wcs}?SERVICE=WCS&VERSION=1.0.0&REQUEST=GetCoverage"
-        f"&COVERAGE=Band1&BBOX={bbox}&CRS=EPSG:4326&RESPONSE_CRS=EPSG:4326"
-        f"&FORMAT=GeoTIFF&RESX=0.00417&RESY=0.00417"
+    # 2. Auto-detect a .tif already present in the gebco/ dir
+    #    (skip our own merged-output name so we can tell them apart).
+    existing = sorted(
+        p for p in out_dir.glob("*.tif")
+        if p.name != "stofs_atlantic_gebco_merged.tif"
     )
-    if _download_file(url, dest):
-        return dest
+    if existing:
+        chosen = existing[0]
+        print(f"  Using existing GEBCO GeoTIFF in {out_dir}:")
+        print(f"    {chosen.name}")
+        if len(existing) > 1:
+            print(f"    (note: {len(existing)} .tif files present; using the first "
+                  f"alphabetically — set GEBCO_LOCAL to pick a specific one)")
+        return chosen
 
-    print("  WARNING: GEBCO download failed. Set GEBCO_LOCAL=/path/to/gebco.tif")
+    # 3. Fallback: download + merge ETOPO2022 15" tiles covering the domain.
+    print("  No local GEBCO file found — attempting ETOPO2022 15\" tile download+merge.")
+    print("  (Recommended instead: download a GEBCO grid from")
+    print("   https://download.gebco.net/ and drop the .tif in this folder,")
+    print("   or set GEBCO_LOCAL. See HERCULES_NOTES.md #5.)")
+    merged = _download_and_merge_etopo(out_dir)
+    if merged is not None:
+        return merged
+
+    print("  WARNING: could not obtain a GEBCO/ETOPO tile.")
+    print("  --> Place a GeoTIFF in", out_dir, "or set GEBCO_LOCAL, then re-run.")
     return None
+
+
+# ETOPO2022 15" NetCDF tiles are served as plain files (no WCS) here:
+_ETOPO_FILESERVER = (
+    "https://www.ngdc.noaa.gov/thredds/fileServer/global/ETOPO2022/15s/"
+    "15s_bed_elev_netcdf"
+)
+# Each tile covers a 15°x15° block named by its NW corner. The domain of
+# interest (lon -100..-50, lat 5..56) is covered by these NW-corner tiles:
+_ETOPO_DOMAIN_TILES = [
+    "ETOPO_2022_v1_15s_N60W105_bed.nc",
+    "ETOPO_2022_v1_15s_N60W090_bed.nc",
+    "ETOPO_2022_v1_15s_N60W075_bed.nc",
+    "ETOPO_2022_v1_15s_N60W060_bed.nc",
+]
+
+
+def _download_and_merge_etopo(out_dir: Path) -> Optional[Path]:
+    """Download the ETOPO2022 15" tiles covering the domain and merge to GeoTIFF.
+
+    Returns the merged GeoTIFF path, or None on failure (e.g. rasterio
+    unavailable or a tile download failed).
+    """
+    try:
+        import rasterio
+        from rasterio.merge import merge as rio_merge
+    except ImportError:
+        print("    rasterio not available — cannot auto-merge ETOPO tiles.")
+        return None
+
+    tile_dir = out_dir / "_etopo_tiles"
+    _ensure_dir(tile_dir)
+
+    tile_paths = []
+    for name in _ETOPO_DOMAIN_TILES:
+        url = f"{_ETOPO_FILESERVER}/{name}"
+        dest = tile_dir / name
+        print(f"    fetching {name} ...")
+        if _download_file(url, dest):
+            tile_paths.append(dest)
+        else:
+            print(f"    FAILED: {url}")
+
+    if not tile_paths:
+        return None
+
+    merged = out_dir / "stofs_atlantic_gebco_merged.tif"
+    try:
+        srcs = [rasterio.open(f"netcdf:{p}:z") for p in tile_paths]
+        mosaic, transform = rio_merge(srcs)
+        meta = srcs[0].meta.copy()
+        meta.update({
+            "driver": "GTiff",
+            "height": mosaic.shape[1],
+            "width": mosaic.shape[2],
+            "transform": transform,
+            "count": mosaic.shape[0],
+        })
+        with rasterio.open(merged, "w", **meta) as dst:
+            dst.write(mosaic)
+        for s in srcs:
+            s.close()
+        print(f"    merged -> {merged.name}")
+        return merged
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        print(f"    ETOPO merge failed: {exc}")
+        print("    (ETOPO NetCDF variable name may differ; use GEBCO_LOCAL instead.)")
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -788,7 +863,7 @@ def download_all(
     raster_list.append({
         "name": "gebco",
         "subfolder": "gebco",
-        "filename": "stofs_atlantic_gebco.tif",
+        "filename": Path(gebco_path).name if gebco_path else "gebco.tif",
         "path": str(gebco_path) if gebco_path else None,
         "url": "n/a",
         "source": "gebco",

@@ -148,13 +148,24 @@ git clone https://github.com/felicio93/ocsmesh_mpi_test.git
 Run on a login node (network access required). Re-runnable: existing files
 are skipped.
 
+**GEBCO note:** the NCEI ETOPO2022 THREDDS server has no WCS, so the
+deep-ocean tile is NOT auto-downloaded (see HERCULES_NOTES.md #5). Provide
+it yourself: download a GEBCO grid for the domain from
+https://download.gebco.net/ (GeoTIFF) and either drop it in `$DEMS/gebco/`
+or point `GEBCO_LOCAL` at it. The download script auto-detects a `*.tif`
+in `$DEMS/gebco/`.
+
 ```bash
 cd $REPO
+
+# Deep-ocean background: point at your GEBCO GeoTIFF (or just place it in
+# $DEMS/gebco/ and skip this — the script auto-detects it there).
+export GEBCO_LOCAL=$DEMS/gebco/gebco_2024_n56.0_s5.0_w-100.0_e-50.0.tif
 
 # Dry run first — prints how many tiles / how much data, no download:
 python download_dems.py --out-dir $DEMS --manifest $MANIFEST --dry-run
 
-# Real download (~50 GB, takes a while):
+# Real download (~50 GB CUDEM, takes a while):
 python download_dems.py --out-dir $DEMS --manifest $MANIFEST
 
 # Or grab just one subfolder to test the pipeline quickly:
