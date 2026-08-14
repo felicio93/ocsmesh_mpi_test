@@ -2,12 +2,19 @@
 # =============================================================================
 # SLURM job script — single-node benchmark
 # =============================================================================
-# Tests serial, parallel (multiprocessing), and MPI on ONE Hercules node.
-# This is the first thing to run: validates the full pipeline before scaling.
+# Runs four benchmark modes on ONE Hercules node (80 cores, 512 GB):
 #
-# Hercules node specs: 80 cores/node, 512 GB/node.
-# We request the whole node (--exclusive), use 1 rank for Rank 0 (manager)
-# + 79 worker ranks for MPI, and nprocs=79 for the multiprocessing baseline.
+#   serial_true  — true single-core baseline (nprocs=1 forced)
+#   serial_mp    — OCSMesh serial mode, Pool steps use 79 workers
+#   parallel     — full multiprocessing mode, 79 workers
+#   mpi          — MPI mode, 1 manager + 79 worker ranks
+#
+# serial_true/serial_mp/parallel run as srun -n 1 (single rank).
+# mpi runs as srun -n 80 (1 manager + 79 workers).
+#
+# Walltime guide (single node, exclusive):
+#   smoke run (~39 tiles, MA/NH/ME subset): 4–8 h
+#   full run  (~388 tiles, full domain):    use windfall partition, 24–48 h
 #
 # Submit: sbatch slurm_single_node.sh
 # =============================================================================
@@ -19,10 +26,7 @@
 #SBATCH --ntasks-per-node=80          # 1 manager + 79 MPI workers
 #SBATCH --cpus-per-task=1
 #SBATCH --exclusive                   # whole node (512 GB)
-# Walltime guide (single node, exclusive):
-#   smoke run (~39 tiles, MA/NH/ME subset): 2–3 h
-#   full run  (~388 tiles, full domain):    24–48 h (use windfall partition)
-#SBATCH --time=04:00:00
+#SBATCH --time=08:00:00
 #SBATCH --output=logs/bench_1node_%j.out
 #SBATCH --error=logs/bench_1node_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
@@ -90,9 +94,9 @@ else
     echo "--- Step 1: DEMs already downloaded (manifest found) ---"
 fi
 
-# ── Step 2: Serial + Parallel benchmarks (single process) ────────────────────
+# ── Step 2: serial_true + serial_mp + parallel benchmarks (single rank) ───────
 echo ""
-echo "--- Step 2: Serial and Parallel benchmarks ---"
+echo "--- Step 2: serial_true / serial_mp / parallel benchmarks ---"
 NPROCS=79   # = ntasks_per_node - 1 (leave one for the MPI manager)
 
 srun --mpi=pmi2 -n 1 python "${SCRIPT_DIR}/run_benchmark.py" \
@@ -100,7 +104,7 @@ srun --mpi=pmi2 -n 1 python "${SCRIPT_DIR}/run_benchmark.py" \
     --shapefile "${STOFS_SHAPEFILE}" \
     --out-dir   "${RESULTS_DIR}/serial_parallel" \
     --nprocs    "${NPROCS}" \
-    --modes     serial parallel
+    --modes     serial_true serial_mp parallel
 
 # ── Step 3: MPI benchmark (all 80 ranks) ─────────────────────────────────────
 echo ""

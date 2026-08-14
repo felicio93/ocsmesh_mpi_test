@@ -35,11 +35,12 @@
 PROJ="/work2/noaa/nos-surge/felicioc/OCSMesh_MPI"
 CONDA_ENV="ocsmesh_mpi_test"
 STOFS_SHAPEFILE="${PROJ}/inputs/stofs3.shp"
-MANIFEST="${PROJ}/stofs_dems/dem_manifest.json"
+SCRIPT_DIR="${PROJ}/ocsmesh_mpi_test"
+# Use the smoke manifest for validation; switch to dem_manifest.json for production.
+MANIFEST="${SCRIPT_DIR}/dem_manifest_smoke.json"
 # IMPORTANT: RESULTS_DIR MUST be on a shared filesystem visible to ALL nodes
 # (Lustre/GPFS) — /work2 qualifies; node-local /tmp does NOT.
 RESULTS_DIR="${PROJ}/results/multi_node_${SLURM_JOB_ID}"
-SCRIPT_DIR="${PROJ}/ocsmesh_mpi_test"
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail

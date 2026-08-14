@@ -6,41 +6,68 @@ This script is the heart of the Hercules benchmark. It:
 2.  Builds an ``HfunCollector`` that covers the full STOFS-3D-Atlantic
     domain with one representative mesh refinement *per geographic region*
     (one refinement type per bounding box).
-3.  Runs three back-to-back executions:
-        a. serial          (execution_mode='serial')
-        b. parallel        (execution_mode='parallel', nprocs=<N>)
-        c. MPI             (execution_mode='mpi')
+3.  Runs four back-to-back executions:
+        a. serial_true   (execution_mode='serial',   nprocs=1)
+                         True single-core baseline. All Pool calls use
+                         1 worker, so nothing runs in parallel.
+        b. serial_mp     (execution_mode='serial',   nprocs=<N>)
+                         OCSMesh serial mode but Pool-based steps
+                         (contours, channels, patches, linefeatures)
+                         use N workers. Meshdata dispatch is single-
+                         threaded. Isolates the effect of those Pool
+                         steps vs. serial_true.
+        c. parallel      (execution_mode='parallel', nprocs=<N>)
+                         Full multiprocessing mode. All per-tile steps
+                         and meshdata dispatch use N workers.
+        d. mpi           (execution_mode='mpi')
+                         MPI mode via MPIExecutor. Must be launched
+                         under srun/mpiexec with N+1 ranks total
+                         (1 manager + N workers).
     and times each with both wall-clock and cProfile.
-4.  Saves per-mode timing, stats, and cProfile `.prof` files alongside a
-    JSON summary (``benchmark_results.json``).
+4.  Saves per-mode timing, stats, .2dm mesh files, and cProfile `.prof`
+    files alongside a JSON summary (``benchmark_results.json``).
+
+Mode → OCSMesh mapping
+-----------------------
+    Benchmark mode   execution_mode   nprocs passed to Hfun
+    serial_true      'serial'         1
+    serial_mp        'serial'         <N>
+    parallel         'parallel'       <N>
+    mpi              'mpi'            <N>   (N = MPI size - 1)
 
 MPI awareness
 -------------
-Under ``mpiexec`` / ``srun`` only Rank 0 runs the serial and parallel
-benchmarks. All ranks participate in the MPI benchmark. Worker ranks
-call ``hfun.meshdata()`` and return ``None``; only Rank 0 writes output.
+Under ``mpiexec`` / ``srun`` only Rank 0 runs serial_true, serial_mp,
+and parallel benchmarks. All ranks participate in the MPI benchmark.
+Worker ranks call ``hfun.meshdata()`` and return ``None``; only Rank 0
+writes output.
 
 Usage (interactive / pre-test)
 -------------------------------
-    # Serial + parallel only (no mpiexec needed):
+    # True serial only (no mpiexec needed):
     python run_benchmark.py --manifest dem_manifest.json \\
                             --shapefile /path/to/stofs_domain.shp \\
                             --out-dir ./results \\
                             --nprocs 40 \\
-                            --modes serial parallel
+                            --modes serial_true serial_mp parallel
 
-    # Full three-mode run under MPI:
+    # Full four-mode run under MPI:
     mpiexec -n 41 python run_benchmark.py \\
         --manifest dem_manifest.json \\
         --shapefile /path/to/stofs_domain.shp \\
         --out-dir ./results \\
         --nprocs 40 \\
-        --modes serial parallel mpi
+        --modes serial_true serial_mp parallel mpi
 
 Profile output files (Rank 0 only):
-    <out-dir>/profile_serial.prof
+    <out-dir>/profile_serial_true.prof
+    <out-dir>/profile_serial_mp.prof
     <out-dir>/profile_parallel.prof
     <out-dir>/profile_mpi.prof
+    <out-dir>/hfun_serial_true.2dm
+    <out-dir>/hfun_serial_mp.2dm
+    <out-dir>/hfun_parallel.2dm
+    <out-dir>/hfun_mpi.2dm
     <out-dir>/benchmark_results.json
 """
 
@@ -115,6 +142,23 @@ import build_geom_and_hfun as recipe
 from build_geom_and_hfun import GLOBAL_HMIN, GLOBAL_HMAX
 
 # ---------------------------------------------------------------------------
+# Mode definitions
+# ---------------------------------------------------------------------------
+# Maps benchmark mode name -> (ocsmesh execution_mode, nprocs_override)
+# nprocs_override=None means "use args.nprocs as-is"
+# nprocs_override=1    means "force nprocs=1 regardless of args.nprocs"
+
+_ALL_MODES = ["serial_true", "serial_mp", "parallel", "mpi"]
+
+_MODE_CONFIG = {
+    #  benchmark_mode : (ocsmesh_execution_mode, nprocs_override)
+    "serial_true": ("serial",   1),     # true single-core: nprocs forced to 1
+    "serial_mp":   ("serial",   None),  # serial mode, Pool steps use N workers
+    "parallel":    ("parallel", None),  # full multiprocessing
+    "mpi":         ("mpi",      None),  # MPI via MPIExecutor
+}
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -143,7 +187,6 @@ def _load_domain_shape(shapefile: Optional[Path]):
             "No shapefile provided (or file not found). "
             "Using default STOFS-3D-Atlantic bounding box."
         )
-        # Broad bounding box: roughly the STOFS-3D-Atlantic extent
         return box(-100.0, 7.0, -50.0, 47.0)
 
 
@@ -152,30 +195,8 @@ def _build_hfun(
     domain_shape,
     nprocs: int,
     execution_mode: str,
-    logger=None,
 ) -> Hfun:
-    """Construct the HfunCollector with all DEMs and all refinements.
-
-    Thin wrapper around ``build_geom_and_hfun.build_hfun``. The actual
-    recipe (raster ordering, index-modulo per-source refinements, global
-    contour/channel, box-based region/patch/feature) lives in
-    build_geom_and_hfun.py so it can be edited/inspected independently.
-
-    Parameters
-    ----------
-    manifest : dict
-        Output of download_dems.py — maps DEM name → metadata.
-    domain_shape :
-        Shapely geometry (used as base_shape for spatial clipping of DEMs).
-    nprocs : int
-        Number of workers for parallel / MPI mode.
-    execution_mode : {'serial', 'parallel', 'mpi'}
-    logger : logging.Logger, optional
-
-    Returns
-    -------
-    Hfun (HfunCollector)
-    """
+    """Construct the HfunCollector with all DEMs and all refinements."""
     raster_paths, raster_metas = recipe.load_ordered_rasters(manifest)
     if not raster_paths:
         raise RuntimeError(
@@ -202,7 +223,15 @@ def _run_mode(
     mode: str,
     out_dir: Path,
 ) -> Dict:
-    """Run meshdata() for one execution mode.
+    """Run meshdata() for one benchmark mode.
+
+    Parameters
+    ----------
+    nprocs : int
+        Number of parallel workers as requested by the user (args.nprocs).
+        For 'serial_true' this is overridden to 1 internally.
+    mode : str
+        One of serial_true, serial_mp, parallel, mpi.
 
     Returns a result dict with timing stats and output mesh stats.
     Only meaningful on Rank 0; worker ranks return an empty dict.
@@ -210,15 +239,22 @@ def _run_mode(
     log = _logger
     result: Dict = {"mode": mode, "status": "pending"}
 
+    ocsmesh_mode, nprocs_override = _MODE_CONFIG[mode]
+    effective_nprocs = nprocs_override if nprocs_override is not None else nprocs
+
     prof = cProfile.Profile()
     t0 = time.perf_counter()
 
     try:
         log.info(f"{'='*60}")
         log.info(f"Starting mode: {mode.upper()}")
+        log.info(
+            f"  ocsmesh execution_mode={ocsmesh_mode!r}  "
+            f"nprocs={effective_nprocs}"
+        )
         log.info(f"{'='*60}")
 
-        hfun = _build_hfun(manifest, domain_shape, nprocs, mode)
+        hfun = _build_hfun(manifest, domain_shape, effective_nprocs, ocsmesh_mode)
 
         # ── Profile + run ────────────────────────────────────────────
         prof.enable()
@@ -237,6 +273,8 @@ def _run_mode(
         vals = meshdata.values
         result = {
             "mode": mode,
+            "ocsmesh_execution_mode": ocsmesh_mode,
+            "effective_nprocs": effective_nprocs,
             "status": "success",
             "wall_time_s": round(wall_time, 3),
             "n_nodes": n_nodes,
@@ -278,6 +316,8 @@ def _run_mode(
         log.error(f"[{mode}] FAILED after {wall_time:.1f}s: {exc}\n{tb}")
         result = {
             "mode": mode,
+            "ocsmesh_execution_mode": ocsmesh_mode,
+            "effective_nprocs": effective_nprocs,
             "status": "failed",
             "wall_time_s": round(wall_time, 3),
             "error": repr(exc),
@@ -293,7 +333,22 @@ def _run_mode(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="OCSMesh STOFS-3D-Atlantic benchmark (serial / parallel / MPI)."
+        description="OCSMesh STOFS-3D-Atlantic benchmark.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Modes
+-----
+  serial_true   True single-core baseline (nprocs=1 forced).
+                All Pool-based steps use exactly 1 worker.
+  serial_mp     OCSMesh serial mode with multiprocessing pools.
+                Pool-based steps (contours, channels, patches,
+                linefeatures) use --nprocs workers; meshdata
+                dispatch is single-threaded.
+  parallel      Full multiprocessing mode (execution_mode=parallel).
+                All per-tile steps and meshdata use --nprocs workers.
+  mpi           MPI mode via MPIExecutor.
+                Must be launched under srun/mpiexec.
+        """,
     )
     parser.add_argument(
         "--manifest",
@@ -311,20 +366,23 @@ def main() -> None:
         "--out-dir",
         type=Path,
         default=Path("./benchmark_results"),
-        help="Directory for results, profiles, and logs",
+        help="Directory for results, profiles, logs, and .2dm meshes",
     )
     parser.add_argument(
         "--nprocs",
         type=int,
         default=max(os.cpu_count() or 1, 1),
-        help="Number of processes for parallel mode (default: all CPUs)",
+        help=(
+            "Number of workers for serial_mp, parallel, and mpi modes. "
+            "Ignored for serial_true (always 1). Default: all CPUs."
+        ),
     )
     parser.add_argument(
         "--modes",
         nargs="+",
-        choices=["serial", "parallel", "mpi"],
-        default=["serial", "parallel", "mpi"],
-        help="Execution modes to benchmark (default: all three)",
+        choices=_ALL_MODES,
+        default=_ALL_MODES,
+        help=f"Benchmark modes to run (default: all four). Choices: {_ALL_MODES}",
     )
     parser.add_argument(
         "--hmin",
@@ -340,10 +398,6 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    # Apply CLI overrides to the recipe module (build_geom_and_hfun), which
-    # is the single source of truth for the size bounds used when building
-    # the Hfun. run_benchmark's module-level GLOBAL_HMIN/HMAX are just the
-    # imported defaults for the argparse help text.
     recipe.GLOBAL_HMIN = args.hmin
     recipe.GLOBAL_HMAX = args.hmax
 
@@ -353,7 +407,7 @@ def main() -> None:
         _logger.info(f"Output directory : {args.out_dir.resolve()}")
         _logger.info(f"Manifest         : {args.manifest.resolve()}")
         _logger.info(f"Shapefile        : {args.shapefile}")
-        _logger.info(f"nprocs           : {args.nprocs}")
+        _logger.info(f"nprocs           : {args.nprocs}  (serial_true always uses 1)")
         _logger.info(f"Modes            : {args.modes}")
         _logger.info(f"MPI active       : {_MPI_ACTIVE}  (size={_SIZE})")
         _logger.info(f"hmin={recipe.GLOBAL_HMIN} m  hmax={recipe.GLOBAL_HMAX} m")
@@ -389,12 +443,12 @@ def main() -> None:
             if _IS_MANAGER:
                 _logger.warning(
                     "Skipping MPI mode — not running under mpiexec/srun. "
-                    "Re-run with: mpiexec -n <N+1> python run_benchmark.py --modes mpi"
+                    "Re-run with: srun --mpi=pmi2 -n <N+1> python run_benchmark.py --modes mpi"
                 )
             continue
 
-        if mode in ("serial", "parallel") and not _IS_MANAGER:
-            # Workers have nothing to do for non-MPI modes
+        # Non-MPI modes: only rank 0 runs them; workers have nothing to do.
+        if mode in ("serial_true", "serial_mp", "parallel") and not _IS_MANAGER:
             continue
 
         result = _run_mode(
@@ -411,20 +465,26 @@ def main() -> None:
 
     # ── Write summary JSON (rank 0 only) ─────────────────────────────
     if _IS_MANAGER and all_results:
-        # Compute speedups relative to serial baseline (if present)
-        serial_time = next(
+        # Speedup relative to serial_true baseline (if present), else serial_mp
+        baseline_time = next(
             (r["wall_time_s"] for r in all_results
-             if r["mode"] == "serial" and r["status"] == "success"),
+             if r["mode"] == "serial_true" and r["status"] == "success"),
             None,
         )
+        if baseline_time is None:
+            baseline_time = next(
+                (r["wall_time_s"] for r in all_results
+                 if r["mode"] == "serial_mp" and r["status"] == "success"),
+                None,
+            )
         for r in all_results:
-            if serial_time and r.get("status") == "success":
-                r["speedup_vs_serial"] = round(serial_time / r["wall_time_s"], 3)
+            if baseline_time and r.get("status") == "success":
+                r["speedup_vs_baseline"] = round(baseline_time / r["wall_time_s"], 3)
 
         summary = {
             "hostname": os.uname().nodename,
             "mpi_size": _SIZE,
-            "nprocs_parallel": args.nprocs,
+            "nprocs_requested": args.nprocs,
             "hmin": recipe.GLOBAL_HMIN,
             "hmax": recipe.GLOBAL_HMAX,
             "n_dems": sum(
@@ -437,19 +497,26 @@ def main() -> None:
         _logger.info(f"\nResults written to {out_json}")
 
         # ── Print summary table ──────────────────────────────────────
-        _logger.info("\n" + "=" * 65)
+        _logger.info("\n" + "=" * 72)
         _logger.info("  BENCHMARK SUMMARY")
-        _logger.info("=" * 65)
-        _logger.info(f"  {'Mode':<12} {'Status':<10} {'Time (s)':>10}  {'Speedup':>9}  {'Nodes':>10}")
-        _logger.info(f"  {'-'*12} {'-'*10} {'-'*10}  {'-'*9}  {'-'*10}")
+        _logger.info("=" * 72)
+        _logger.info(
+            f"  {'Mode':<14} {'nprocs':>6}  {'Status':<10} "
+            f"{'Time (s)':>10}  {'Speedup':>9}  {'Nodes':>10}"
+        )
+        _logger.info(
+            f"  {'-'*14} {'-'*6}  {'-'*10} "
+            f"{'-'*10}  {'-'*9}  {'-'*10}"
+        )
         for r in all_results:
-            sp = f"{r.get('speedup_vs_serial', 1.0):.2f}x"
+            sp = f"{r.get('speedup_vs_baseline', 1.0):.2f}x"
             nd = f"{r.get('n_nodes', 0):,}"
+            np_ = r.get('effective_nprocs', '?')
             _logger.info(
-                f"  {r['mode']:<12} {r['status']:<10} "
+                f"  {r['mode']:<14} {np_:>6}  {r['status']:<10} "
                 f"{r.get('wall_time_s', 0):>10.2f}  {sp:>9}  {nd:>10}"
             )
-        _logger.info("=" * 65)
+        _logger.info("=" * 72)
 
 
 if __name__ == "__main__":
