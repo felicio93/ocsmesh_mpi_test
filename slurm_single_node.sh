@@ -60,7 +60,9 @@ source "/work2/noaa/nos-surge/felicioc/envs/miniconda3/etc/profile.d/conda.sh"
 conda activate "${CONDA_ENV}"
 
 # Verify mpi4py sees the right MPI
-python -c "from mpi4py import MPI; print('mpi4py MPI version:', MPI.Get_version())"
+# Must use srun --mpi=pmi2 even for single-rank calls: inside a SLURM allocation
+# 'import ocsmesh' triggers MPI_Init, which aborts without a PMI server. See HERCULES_NOTES #7b.
+srun --mpi=pmi2 -n 1 python -c "from mpi4py import MPI; print('mpi4py MPI version:', MPI.Get_version())"
 
 # Thread pinning (belt-and-suspenders; ocsmesh also sets these in MPI mode)
 export OMP_NUM_THREADS=1
@@ -88,7 +90,7 @@ echo ""
 echo "--- Step 2: Serial and Parallel benchmarks ---"
 NPROCS=79   # = ntasks_per_node - 1 (leave one for the MPI manager)
 
-python "${SCRIPT_DIR}/run_benchmark.py" \
+srun --mpi=pmi2 -n 1 python "${SCRIPT_DIR}/run_benchmark.py" \
     --manifest "${MANIFEST}" \
     --shapefile "${STOFS_SHAPEFILE}" \
     --out-dir   "${RESULTS_DIR}/serial_parallel" \
@@ -116,7 +118,7 @@ srun --mpi=pmi2 --ntasks=80 --nodes=1 python "${SCRIPT_DIR}/run_benchmark.py" \
 # ── Step 4: Profiling report ──────────────────────────────────────────────────
 echo ""
 echo "--- Step 4: Generating profiling reports ---"
-python "${SCRIPT_DIR}/analyze_profile.py" \
+srun --mpi=pmi2 -n 1 python "${SCRIPT_DIR}/analyze_profile.py" \
     --results-dir  "${RESULTS_DIR}" \
     --out          "${RESULTS_DIR}/benchmark_report.txt"
 

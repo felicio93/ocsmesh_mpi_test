@@ -69,7 +69,9 @@ module load netcdf-fortran/4.6.0
 source "/work2/noaa/nos-surge/felicioc/envs/miniconda3/etc/profile.d/conda.sh"
 conda activate "${CONDA_ENV}"
 
-python -c "from mpi4py import MPI; print('mpi4py MPI version:', MPI.Get_version())"
+# Must use srun --mpi=pmi2 even for single-rank calls: inside a SLURM allocation
+# 'import ocsmesh' triggers MPI_Init, which aborts without a PMI server. See HERCULES_NOTES #7b.
+srun --mpi=pmi2 -n 1 python -c "from mpi4py import MPI; print('mpi4py MPI version:', MPI.Get_version())"
 
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
@@ -115,7 +117,7 @@ srun --mpi=pmi2 \
 # ── Step 3: Report ────────────────────────────────────────────────────────────
 echo ""
 echo "--- Generating profiling report ---"
-python "${SCRIPT_DIR}/analyze_profile.py" \
+srun --mpi=pmi2 -n 1 python "${SCRIPT_DIR}/analyze_profile.py" \
     --results-dir  "${RESULTS_DIR}" \
     --out          "${RESULTS_DIR}/benchmark_report_multinode.txt"
 
