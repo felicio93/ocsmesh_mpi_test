@@ -66,9 +66,13 @@ import numpy as np
 # MPI bootstrap (must precede any ocsmesh import)
 # ---------------------------------------------------------------------------
 # ocsmesh.__init__ calls _configure_mpi_environment() at import time, which
-# pins thread pools and sets multiprocessing start method.  We just need to
-# be careful not to import MPI ourselves before ocsmesh does.
+# pins thread pools and sets multiprocessing start method to 'spawn'.
+# IMPORTANT: import ocsmesh FIRST so __init__ runs _configure_mpi_environment()
+# before any Pool() is created. Importing ocsmesh.mpi directly first would
+# bypass __init__ and leave multiprocessing start method as 'fork', causing
+# PMI_Init aborts in Pool worker processes under a SLURM allocation.
 
+import ocsmesh  # noqa: F401 — triggers _configure_mpi_environment() in __init__
 from ocsmesh.mpi import (
     MPIExecutor,
     _get_mpi,
@@ -100,7 +104,6 @@ logging.basicConfig(
 )
 _logger = logging.getLogger("stofs_benchmark")
 
-# Now safe to import ocsmesh
 from ocsmesh import Hfun, Raster
 from shapely.geometry import box, MultiPolygon, Polygon
 import geopandas as gpd
