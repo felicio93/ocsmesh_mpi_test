@@ -195,6 +195,7 @@ def _build_hfun(
     domain_shape,
     nprocs: int,
     execution_mode: str,
+    light_features: bool = False,
 ) -> Hfun:
     """Construct the HfunCollector with all DEMs and all refinements."""
     raster_paths, raster_metas = recipe.load_ordered_rasters(manifest)
@@ -209,6 +210,7 @@ def _build_hfun(
         domain_shape,
         nprocs,
         execution_mode,
+        light_features=light_features,
     )
 
 
@@ -222,6 +224,7 @@ def _run_mode(
     nprocs: int,
     mode: str,
     out_dir: Path,
+    light_features: bool = False,
 ) -> Dict:
     """Run meshdata() for one benchmark mode.
 
@@ -254,7 +257,10 @@ def _run_mode(
         )
         log.info(f"{'='*60}")
 
-        hfun = _build_hfun(manifest, domain_shape, effective_nprocs, ocsmesh_mode)
+        hfun = _build_hfun(
+            manifest, domain_shape, effective_nprocs, ocsmesh_mode,
+            light_features=light_features,
+        )
 
         # ── Profile + run ────────────────────────────────────────────
         prof.enable()
@@ -385,6 +391,15 @@ Modes
         help=f"Benchmark modes to run (default: all four). Choices: {_ALL_MODES}",
     )
     parser.add_argument(
+        "--light-features",
+        action="store_true",
+        help=(
+            "Skip global add_contour / add_channel refinements. These are the "
+            "O(tiles x segments) bottleneck of the exact method. Use for fast "
+            "MPI-path debugging; the per-tile and box refinements still run."
+        ),
+    )
+    parser.add_argument(
         "--hmin",
         type=float,
         default=GLOBAL_HMIN,
@@ -409,6 +424,7 @@ Modes
         _logger.info(f"Shapefile        : {args.shapefile}")
         _logger.info(f"nprocs           : {args.nprocs}  (serial_true always uses 1)")
         _logger.info(f"Modes            : {args.modes}")
+        _logger.info(f"Light features   : {args.light_features}  (skip contour/channel if True)")
         _logger.info(f"MPI active       : {_MPI_ACTIVE}  (size={_SIZE})")
         _logger.info(f"hmin={recipe.GLOBAL_HMIN} m  hmax={recipe.GLOBAL_HMAX} m")
 
@@ -457,6 +473,7 @@ Modes
             args.nprocs,
             mode,
             args.out_dir,
+            light_features=args.light_features,
         )
 
         # Worker ranks return empty dict from _run_mode when meshdata()=None

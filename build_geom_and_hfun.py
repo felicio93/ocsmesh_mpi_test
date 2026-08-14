@@ -191,6 +191,7 @@ def build_hfun(
     domain_shape,
     nprocs: int,
     execution_mode: str,
+    light_features: bool = False,
 ):
     """Build an HfunCollector and apply all refinements.
 
@@ -302,20 +303,27 @@ def build_hfun(
         )
 
     # ── Global refinements: contour + channel (all rasters) ───────────
-    _logger.info("  Global: add_contour (0 m + -200 m)")
-    hfun.add_contour(
-        level=[0.0, -200.0],
-        expansion_rate=EXPANSION_RATE,
-        target_size=1500.0,
-    )
+    # These are the O(tiles × contour-segments) bottleneck of the `exact`
+    # method. For fast MPI-path debugging, light_features=True skips them.
+    # The per-tile refinements above and the box refinements below still run,
+    # so the MPI per-tile meshdata() path is fully exercised.
+    if light_features:
+        _logger.info("  Global: add_contour / add_channel SKIPPED (light_features=True)")
+    else:
+        _logger.info("  Global: add_contour (0 m + -200 m)")
+        hfun.add_contour(
+            level=[0.0, -200.0],
+            expansion_rate=EXPANSION_RATE,
+            target_size=1500.0,
+        )
 
-    _logger.info("  Global: add_channel")
-    hfun.add_channel(
-        level=0.0,
-        width=1000.0,
-        target_size=1000.0,
-        expansion_rate=EXPANSION_RATE,
-    )
+        _logger.info("  Global: add_channel")
+        hfun.add_channel(
+            level=0.0,
+            width=1000.0,
+            target_size=1000.0,
+            expansion_rate=EXPANSION_RATE,
+        )
 
     # ── Shape-based refinements: fixed boxes ──────────────────────────
     _logger.info(f"  Box1 {BOX1}: add_region_constraint (max 3500 m)")

@@ -42,6 +42,15 @@ SCRIPT_DIR="${PROJ}/ocsmesh_mpi_test"
 # Switch to dem_manifest.json for the full 388-tile production benchmark.
 MANIFEST="${SCRIPT_DIR}/dem_manifest_smoke.json"
 RESULTS_DIR="${PROJ}/results/single_node_${SLURM_JOB_ID}"
+
+# Set LIGHT_FEATURES=1 to skip global add_contour/add_channel (fast MPI-path
+# debugging). Leave unset/0 for the full realistic recipe.
+LIGHT_FEATURES="${LIGHT_FEATURES:-0}"
+LIGHT_FLAG=""
+if [ "${LIGHT_FEATURES}" = "1" ]; then
+    LIGHT_FLAG="--light-features"
+    echo "NOTE: LIGHT_FEATURES=1 -> global contour/channel refinements SKIPPED"
+fi
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -104,7 +113,8 @@ srun --mpi=pmi2 -n 1 python "${SCRIPT_DIR}/run_benchmark.py" \
     --shapefile "${STOFS_SHAPEFILE}" \
     --out-dir   "${RESULTS_DIR}/serial_parallel" \
     --nprocs    "${NPROCS}" \
-    --modes     serial_mp parallel
+    --modes     serial_mp parallel \
+    ${LIGHT_FLAG}
 
 # ── Step 3: MPI benchmark (all 80 ranks) ─────────────────────────────────────
 echo ""
@@ -122,7 +132,8 @@ srun --mpi=pmi2 --ntasks=80 --nodes=1 python "${SCRIPT_DIR}/run_benchmark.py" \
     --shapefile "${STOFS_SHAPEFILE}" \
     --out-dir   "${RESULTS_DIR}/mpi" \
     --nprocs    "${NPROCS}" \
-    --modes     mpi
+    --modes     mpi \
+    ${LIGHT_FLAG}
 
 # ── Step 4: Profiling report ──────────────────────────────────────────────────
 echo ""

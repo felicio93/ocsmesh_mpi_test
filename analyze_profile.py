@@ -68,6 +68,70 @@ def _status_icon(status: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Pipeline-stage bucketing
+# ---------------------------------------------------------------------------
+# Map OCSMesh pipeline stages to substrings that appear in the cProfile
+# function keys (filename:lineno(funcname)). cProfile records cumulative time
+# per function; we attribute each stage to its top-level entry function so the
+# times are non-overlapping at the stage level.
+#
+# Goal #2: identify which parts of mesh generation (DEM load -> features ->
+# per-tile meshdata -> composite -> write) dominate, and therefore which
+# deserve parallelization next.
+_STAGE_MARKERS = {
+    "geom_build":        ["build_geom", "GeomCollector", "combine_geom"],
+    "hfun_construct":    ["build_hfun", "HfunCollector.__init__", "clip"],
+    "apply_features":    ["_apply_features", "_apply_contours", "_apply_channels",
+                          "_apply_flow_limiters", "_apply_const_val",
+                          "_apply_constraints", "_apply_patch",
+                          "_apply_linefeatures", "add_feature", "add_contour",
+                          "add_channel"],
+    "calc_write_meshdata": ["_calculate_and_write_hfun_to_disk", "meshdata",
+                            "_meshdata_task_worker", "triangulate", "msh_t",
+                            "interpolate"],
+    "composite":         ["_get_hfun_composite", "vstack", "project_to_utm"],
+    "mesh_write_2dm":    ["sms2dm", "meshdata_to_2dm", "write"],
+    "raster_io":         ["rasterio", "Raster", "resampl", "warp", "reproject"],
+    "kdtree":            ["cKDTree", "KDTree", "query"],
+}
+
+
+def _bucket_profile_by_stage(prof_path: Path) -> Optional[Dict[str, float]]:
+    """Bucket a cProfile .prof into pipeline stages by cumulative time.
+
+    Returns a dict {stage: seconds} where seconds is the max cumulative time
+    of any function attributed to that stage (cumulative avoids double-counting
+    children within a stage; taking the max picks the stage's entry point).
+    Returns None if the profile file is missing.
+    """
+    if not prof_path.exists():
+        return None
+
+    ps = pstats.Stats(str(prof_path))
+    # ps.stats: {(file, line, func): (cc, nc, tt, ct, callers)}
+    #   tt = total (self) time, ct = cumulative time
+    stage_cum: Dict[str, float] = {s: 0.0 for s in _STAGE_MARKERS}
+    stage_self: Dict[str, float] = {s: 0.0 for s in _STAGE_MARKERS}
+
+    for (fname, _lineno, funcname), (_cc, _nc, tt, ct, _callers) in ps.stats.items():
+        key = f"{fname}:{funcname}"
+        for stage, markers in _STAGE_MARKERS.items():
+            if any(m in key for m in markers):
+                # cumulative: take the max (entry-point) to avoid summing
+                # a function and its own recursive/child frames.
+                stage_cum[stage] = max(stage_cum[stage], ct)
+                # self time: sum, since self-times are non-overlapping.
+                stage_self[stage] += tt
+                break
+
+    # Return self-time buckets (non-overlapping, sums to ~total runtime).
+    return stage_self
+
+
+
+
+
+# ---------------------------------------------------------------------------
 # Report builder
 # ---------------------------------------------------------------------------
 
@@ -113,7 +177,7 @@ def build_report(
         for summary in summaries:
             hostname = summary.get("hostname", "unknown")
             mpi_size = summary.get("mpi_size", 1)
-            nprocs = summary.get("nprocs_parallel", "?")
+            nprocs = summary.get("nprocs_requested", "?")
             n_dems = summary.get("n_dems", "?")
             hmin = summary.get("hmin", "?")
             hmax = summary.get("hmax", "?")
@@ -135,8 +199,8 @@ def build_report(
             )
             for r in summary.get("results", []):
                 sp = (
-                    f"{r.get('speedup_vs_serial', 1.0):.2f}x"
-                    if "speedup_vs_serial" in r else " — "
+                    f"{r.get('speedup_vs_baseline', 1.0):.2f}x"
+                    if "speedup_vs_baseline" in r else " — "
                 )
                 nodes = f"{r.get('n_nodes', 0):,}"
                 tria = f"{r.get('n_triangles', 0):,}"
@@ -165,7 +229,7 @@ def build_report(
 
             # ── cProfile hotspots ────────────────────────────────────────────
             h("cProfile Hotspots (cumulative time)")
-            for mode in ("serial", "parallel", "mpi"):
+            for mode in ("serial_true", "serial_mp", "parallel", "mpi"):
                 # Search this dir and sub-dirs
                 candidates = [
                     results_dir / f"profile_{mode}.prof",
@@ -181,13 +245,57 @@ def build_report(
                     lines.append(f"\n--- {mode.upper()} ---")
                     lines.append("  [no .prof file found]\n")
 
+            # ── Per-stage time breakdown (goal #2: find bottlenecks) ─────────
+            h("Pipeline Stage Breakdown (self-time seconds, from cProfile)")
+            lines.append(
+                "  Buckets cProfile self-time into mesh-gen stages so you can "
+                "see which\n  steps dominate and deserve parallelization.\n"
+            )
+            stage_names = list(_STAGE_MARKERS.keys())
+            header = "  {:<22}".format("stage") + "".join(
+                f"{m:>16}" for m in ("serial_true", "serial_mp", "parallel", "mpi")
+            )
+            lines.append(header)
+            lines.append("  " + "-" * (22 + 16 * 4))
+            # Collect buckets per mode
+            mode_buckets = {}
+            for mode in ("serial_true", "serial_mp", "parallel", "mpi"):
+                candidates = [
+                    results_dir / f"profile_{mode}.prof",
+                    results_dir / "serial_parallel" / f"profile_{mode}.prof",
+                    results_dir / "mpi" / f"profile_{mode}.prof",
+                ]
+                buckets = None
+                for prof_path in candidates:
+                    b = _bucket_profile_by_stage(prof_path)
+                    if b is not None:
+                        buckets = b
+                        break
+                mode_buckets[mode] = buckets
+            for stage in stage_names:
+                row = "  {:<22}".format(stage)
+                for mode in ("serial_true", "serial_mp", "parallel", "mpi"):
+                    b = mode_buckets.get(mode)
+                    if b is None:
+                        row += f"{'—':>16}"
+                    else:
+                        row += f"{b.get(stage, 0.0):>16.2f}"
+                lines.append(row)
+            lines.append("")
+
     # ── Numerical equivalence check ─────────────────────────────────────────
     h("Numerical Equivalence Check (serial baseline)")
     serial_result = next(
         (r for r in all_run_results
-         if r["mode"] == "serial" and r["status"] == "success"),
+         if r["mode"] == "serial_true" and r["status"] == "success"),
         None,
     )
+    if serial_result is None:
+        serial_result = next(
+            (r for r in all_run_results
+             if r["mode"] == "serial_mp" and r["status"] == "success"),
+            None,
+        )
     if serial_result:
         s_nodes = serial_result.get("n_nodes", 0)
         s_min = serial_result.get("hfun_min", float("nan"))
@@ -203,8 +311,9 @@ def build_report(
             f"  {'-'*14} {'-'*10}  {'-'*10}  "
             f"{'-'*10}  {'-'*10}  {'-'*10}"
         )
+        baseline_mode = serial_result["mode"]
         for r in all_run_results:
-            if r["mode"] == "serial" or r["status"] != "success":
+            if r["mode"] == baseline_mode or r["status"] != "success":
                 continue
             r_nodes = r.get("n_nodes", 0)
             d_nodes = abs(r_nodes - s_nodes)
@@ -225,12 +334,18 @@ def build_report(
     h("Speedup Summary (CSV — copy-paste to spreadsheet)")
     serial_time = next(
         (r["wall_time_s"] for r in all_run_results
-         if r["mode"] == "serial" and r["status"] == "success"),
+         if r["mode"] == "serial_true" and r["status"] == "success"),
         None,
     )
+    if serial_time is None:
+        serial_time = next(
+            (r["wall_time_s"] for r in all_run_results
+             if r["mode"] == "serial_mp" and r["status"] == "success"),
+            None,
+        )
     csv_io = io.StringIO()
     writer = csv.writer(csv_io)
-    writer.writerow(["mode", "wall_time_s", "speedup_vs_serial", "n_nodes"])
+    writer.writerow(["mode", "wall_time_s", "speedup_vs_baseline", "n_nodes"])
     for r in all_run_results:
         if r["status"] != "success":
             continue
