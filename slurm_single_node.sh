@@ -19,7 +19,10 @@
 #SBATCH --ntasks-per-node=80          # 1 manager + 79 MPI workers
 #SBATCH --cpus-per-task=1
 #SBATCH --exclusive                   # whole node (512 GB)
-#SBATCH --time=08:00:00
+# Walltime guide (single node, exclusive):
+#   smoke run (~39 tiles, MA/NH/ME subset): 2–3 h
+#   full run  (~388 tiles, full domain):    24–48 h (use windfall partition)
+#SBATCH --time=04:00:00
 #SBATCH --output=logs/bench_1node_%j.out
 #SBATCH --error=logs/bench_1node_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL

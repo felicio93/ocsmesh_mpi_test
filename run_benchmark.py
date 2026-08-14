@@ -104,7 +104,7 @@ logging.basicConfig(
 )
 _logger = logging.getLogger("stofs_benchmark")
 
-from ocsmesh import Hfun, Raster
+from ocsmesh import Hfun, Mesh, Raster
 from shapely.geometry import box, MultiPolygon, Polygon
 import geopandas as gpd
 
@@ -256,6 +256,14 @@ def _run_mode(
         prof_path = out_dir / f"profile_{mode}.prof"
         prof.dump_stats(str(prof_path))
         log.info(f"cProfile saved to {prof_path}")
+
+        # ── Save mesh as .2dm for QGIS inspection ────────────────────
+        mesh_path = out_dir / f"hfun_{mode}.2dm"
+        try:
+            Mesh(meshdata).write(str(mesh_path), overwrite=True, format='2dm')
+            log.info(f"Mesh saved to {mesh_path}")
+        except Exception as mesh_exc:  # pylint: disable=broad-exception-caught
+            log.warning(f"Could not save .2dm mesh: {mesh_exc}")
 
         # Also print top-20 cumulative to stdout
         sio = io.StringIO()
