@@ -224,9 +224,20 @@ def build_hfun(
         base_shape=domain_shape,
         base_shape_crs="EPSG:4326",
     )
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", UserWarning)
+    # The execution_mode setter emits UserWarnings for expected conditions:
+    #   - "only 1 rank" when serial/parallel runs are launched under srun -n 1
+    #     (mode falls back to 'parallel' — this is correct, not an error)
+    #   - "no MPI environment detected" when running without srun at all
+    # Capture and log them instead of suppressing them silently, so the caller
+    # can see what mode was actually selected.
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", UserWarning)
         hfun.execution_mode = execution_mode
+    for w in caught:
+        _logger.warning(
+            "execution_mode setter [%s → %s]: %s",
+            execution_mode, hfun.execution_mode, str(w.message)
+        )
 
     # ── Per-source refinements: assign by index modulo ────────────────
     classes = _cudem_indices_by_class(raster_metas)

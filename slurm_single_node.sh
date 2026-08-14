@@ -30,9 +30,11 @@ PROJ="/work2/noaa/nos-surge/felicioc/OCSMesh_MPI"
 CONDA_ENV="ocsmesh_mpi_test"                      # conda env with OCSMesh + mpi4py
 STOFS_SHAPEFILE="${PROJ}/inputs/stofs3.shp"
 DEM_OUT_DIR="${PROJ}/stofs_dems"
-MANIFEST="${DEM_OUT_DIR}/dem_manifest.json"
-RESULTS_DIR="${PROJ}/results/single_node_${SLURM_JOB_ID}"
 SCRIPT_DIR="${PROJ}/ocsmesh_mpi_test"
+# Use the smoke manifest (39 tiles, MA/NH/ME subset) for validation runs.
+# Switch to dem_manifest.json for the full 388-tile production benchmark.
+MANIFEST="${SCRIPT_DIR}/dem_manifest_smoke.json"
+RESULTS_DIR="${PROJ}/results/single_node_${SLURM_JOB_ID}"
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
