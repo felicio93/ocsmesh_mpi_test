@@ -104,7 +104,7 @@ srun --mpi=pmi2 -n 1 python "${SCRIPT_DIR}/run_benchmark.py" \
     --shapefile "${STOFS_SHAPEFILE}" \
     --out-dir   "${RESULTS_DIR}/serial_parallel" \
     --nprocs    "${NPROCS}" \
-    --modes     serial_true serial_mp parallel
+    --modes     serial_mp parallel
 
 # ── Step 3: MPI benchmark (all 80 ranks) ─────────────────────────────────────
 echo ""
