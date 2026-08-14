@@ -39,7 +39,7 @@ MANIFEST="${PROJ}/stofs_dems/dem_manifest.json"
 # IMPORTANT: RESULTS_DIR MUST be on a shared filesystem visible to ALL nodes
 # (Lustre/GPFS) — /work2 qualifies; node-local /tmp does NOT.
 RESULTS_DIR="${PROJ}/results/multi_node_${SLURM_JOB_ID}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="${PROJ}/ocsmesh_mpi_test"
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail

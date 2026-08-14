@@ -32,7 +32,7 @@ STOFS_SHAPEFILE="${PROJ}/inputs/stofs3.shp"
 DEM_OUT_DIR="${PROJ}/stofs_dems"
 MANIFEST="${DEM_OUT_DIR}/dem_manifest.json"
 RESULTS_DIR="${PROJ}/results/single_node_${SLURM_JOB_ID}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="${PROJ}/ocsmesh_mpi_test"
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
