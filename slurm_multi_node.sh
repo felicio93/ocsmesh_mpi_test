@@ -66,7 +66,7 @@ module load hdf5/1.12.2
 module load netcdf-c/4.9.0
 module load netcdf-fortran/4.6.0
 
-source "$(conda info --base)/etc/profile.d/conda.sh"
+source "/work2/noaa/nos-surge/felicioc/envs/miniconda3/etc/profile.d/conda.sh"
 conda activate "${CONDA_ENV}"
 
 python -c "from mpi4py import MPI; print('mpi4py MPI version:', MPI.Get_version())"

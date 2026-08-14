@@ -56,7 +56,7 @@ module load netcdf-c/4.9.0
 module load netcdf-fortran/4.6.0
 
 # Activate conda
-source "$(conda info --base)/etc/profile.d/conda.sh"
+source "/work2/noaa/nos-surge/felicioc/envs/miniconda3/etc/profile.d/conda.sh"
 conda activate "${CONDA_ENV}"
 
 # Verify mpi4py sees the right MPI
