@@ -38,9 +38,12 @@ CONDA_ENV="ocsmesh_mpi_test"                      # conda env with OCSMesh + mpi
 STOFS_SHAPEFILE="${PROJ}/inputs/stofs3.shp"
 DEM_OUT_DIR="${PROJ}/stofs_dems"
 SCRIPT_DIR="${PROJ}/ocsmesh_mpi_test"
-# Use the smoke manifest (39 tiles, MA/NH/ME subset) for validation runs.
-# Switch to dem_manifest.json for the full 388-tile production benchmark.
-MANIFEST="${SCRIPT_DIR}/dem_manifest_smoke.json"
+# Smoke manifests:
+#   dem_manifest_smoke.json    - 39 tiles (MA/NH/ME). serial_mp exceeds 8h.
+#   dem_manifest_smoke15.json  - 14 CUDEM + 1 GEBCO. serial_mp fits in ~6h.
+# For the full 388-tile production benchmark, switch to dem_manifest.json.
+FULL_SMOKE_MANIFEST="${SCRIPT_DIR}/dem_manifest_smoke.json"
+MANIFEST="${SCRIPT_DIR}/dem_manifest_smoke15.json"
 RESULTS_DIR="${PROJ}/results/single_node_${SLURM_JOB_ID}"
 
 # Set LIGHT_FEATURES=1 to skip global add_contour/add_channel (fast MPI-path
@@ -91,16 +94,32 @@ export OPENBLAS_NUM_THREADS=1
 export TMPDIR="/tmp/${SLURM_JOB_ID}"
 mkdir -p "${TMPDIR}"
 
-# ── Step 1: Download DEMs (only if manifest is missing) ───────────────────────
-if [ ! -f "${MANIFEST}" ]; then
+# ── Step 1: Download DEMs (only if the full smoke manifest is missing) ────────
+if [ ! -f "${FULL_SMOKE_MANIFEST}" ]; then
     echo ""
     echo "--- Step 1: Downloading DEMs ---"
     python "${SCRIPT_DIR}/download_dems.py" \
         --out-dir "${DEM_OUT_DIR}" \
-        --manifest "${MANIFEST}"
+        --manifest "${FULL_SMOKE_MANIFEST}" \
+        --only MA_NH_ME
 else
     echo ""
-    echo "--- Step 1: DEMs already downloaded (manifest found) ---"
+    echo "--- Step 1: DEMs already downloaded (full smoke manifest found) ---"
+fi
+
+# ── Step 1b: Trim smoke manifest to 15 tiles so serial_mp fits in 8h ──────────
+# serial_mp applies TopoFuncConstraint serially (~45 min/tile). 39 tiles blow
+# past the 8h wall clock, so we cut to 14 CUDEM + 1 GEBCO (~6h serial_mp).
+if [ ! -f "${MANIFEST}" ]; then
+    echo ""
+    echo "--- Step 1b: Trimming smoke manifest to 15 tiles ---"
+    srun --mpi=pmi2 -n 1 python "${SCRIPT_DIR}/trim_manifest.py" \
+        --in  "${FULL_SMOKE_MANIFEST}" \
+        --out "${MANIFEST}" \
+        --n-cudem 14
+else
+    echo ""
+    echo "--- Step 1b: Trimmed smoke manifest found ---"
 fi
 
 # ── Step 2: serial_true + serial_mp + parallel benchmarks (single rank) ───────
