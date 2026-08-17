@@ -33,7 +33,9 @@ mkdir -p "${RESULTS_DIR}" logs
 load_ocsmesh_env
 print_final_config
 
-export TMPDIR="/tmp/${SLURM_JOB_ID}"
+# Temp files on /work2 (Lustre) — 79 Pool workers writing clipped rasters
+# overflow node-local /tmp.
+export TMPDIR="${RESULTS_DIR}/tmp"
 mkdir -p "${TMPDIR}"
 
 echo ""

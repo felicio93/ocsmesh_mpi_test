@@ -34,8 +34,9 @@ mkdir -p "${RESULTS_DIR}" logs
 load_ocsmesh_env
 print_final_config
 
-# Node-local scratch is fine for single-node serial.
-export TMPDIR="/tmp/${SLURM_JOB_ID}"
+# Temp files on /work2 (Lustre) — node-local /tmp fills up under heavy raster
+# clipping and aborts with 'No space left on device'.
+export TMPDIR="${RESULTS_DIR}/tmp"
 mkdir -p "${TMPDIR}"
 
 echo ""

@@ -90,8 +90,11 @@ export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 
-# Use the SLURM allocation's scratch for temp files (shared FS on single node)
-export TMPDIR="/tmp/${SLURM_JOB_ID}"
+# Temp files (OCSMesh HfunCollector._work_dir, clipped rasters, .npz) go here.
+# MUST be on /work2 (Lustre, 6.3PB) NOT node-local /tmp: with 79 workers each
+# writing full clipped-raster .tif files, a compute node's local disk fills up
+# and OCSMesh aborts with 'No space left on device' (see job 9575590 MPI step).
+export TMPDIR="${RESULTS_DIR}/tmp"
 mkdir -p "${TMPDIR}"
 
 # ── Step 1: Download DEMs (only if the full smoke manifest is missing) ────────
