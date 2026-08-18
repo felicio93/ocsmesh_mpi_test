@@ -43,7 +43,7 @@ SCRIPT_DIR="${PROJ}/ocsmesh_mpi_test"
 #   dem_manifest_smoke15.json  - 14 CUDEM + 1 GEBCO. serial_mp fits in ~6h.
 # For the full 388-tile production benchmark, switch to dem_manifest.json.
 FULL_SMOKE_MANIFEST="${SCRIPT_DIR}/dem_manifest_smoke.json"
-MANIFEST="${SCRIPT_DIR}/dem_manifest_smoke15.json"
+# MANIFEST is set in Step 1b below (trimmed 7-tile smoke manifest).
 RESULTS_DIR="${PROJ}/results/single_node_${SLURM_JOB_ID}"
 
 # Set LIGHT_FEATURES=1 to skip global add_contour/add_channel (fast MPI-path
@@ -110,16 +110,20 @@ else
     echo "--- Step 1: DEMs already downloaded (full smoke manifest found) ---"
 fi
 
-# ── Step 1b: Trim smoke manifest to 15 tiles so serial_mp fits in 8h ──────────
-# serial_mp applies TopoFuncConstraint serially (~45 min/tile). 39 tiles blow
-# past the 8h wall clock, so we cut to 14 CUDEM + 1 GEBCO (~6h serial_mp).
+# ── Step 1b: Trim smoke manifest to 7 tiles (1 per refinement class) ──────────
+# The topo_bound/topo_func/courant constraints run SERIALLY at ~44 min/tile
+# (this is the dominant cost, measured on job 9585234). To fit serial_mp in
+# the 8h wall clock while still exercising EVERY refinement type exactly once,
+# cut to 6 CUDEM tiles (modulo-6 -> 1 tile per class) + 1 GEBCO = 7 tiles.
+#   estimated serial_mp: ~3 constraint tiles x 44 min + fast steps ~= 3h
+MANIFEST="${SCRIPT_DIR}/dem_manifest_smoke7.json"
 if [ ! -f "${MANIFEST}" ]; then
     echo ""
-    echo "--- Step 1b: Trimming smoke manifest to 15 tiles ---"
+    echo "--- Step 1b: Trimming smoke manifest to 7 tiles (1 per class) ---"
     srun --mpi=pmi2 -n 1 python "${SCRIPT_DIR}/trim_manifest.py" \
         --in  "${FULL_SMOKE_MANIFEST}" \
         --out "${MANIFEST}" \
-        --n-cudem 14
+        --n-cudem 6
 else
     echo ""
     echo "--- Step 1b: Trimmed smoke manifest found ---"
