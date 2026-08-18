@@ -54,6 +54,18 @@ if [ "${LIGHT_FEATURES}" = "1" ]; then
     LIGHT_FLAG="--light-features"
     echo "NOTE: LIGHT_FEATURES=1 -> global contour/channel refinements SKIPPED"
 fi
+
+# Set SKIP_TOPOFUNC=1 to skip add_topo_func_constraint. That constraint forces
+# OCSMesh's _apply_constraints to run SERIALLY (~44 min/tile) even in
+# parallel/mpi modes. Skipping it removes the dominant serial bottleneck and
+# lets the constraint stage actually parallelize. Recommended for the smoke
+# test so serial_mp + parallel + mpi all fit in 8h. Default ON here.
+SKIP_TOPOFUNC="${SKIP_TOPOFUNC:-1}"
+SKIP_TOPOFUNC_FLAG=""
+if [ "${SKIP_TOPOFUNC}" = "1" ]; then
+    SKIP_TOPOFUNC_FLAG="--skip-topofunc"
+    echo "NOTE: SKIP_TOPOFUNC=1 -> topo_func_constraint SKIPPED"
+fi
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -140,7 +152,7 @@ srun --mpi=pmi2 -n 1 python "${SCRIPT_DIR}/run_benchmark.py" \
     --out-dir   "${RESULTS_DIR}/serial_parallel" \
     --nprocs    "${NPROCS}" \
     --modes     serial_mp parallel \
-    ${LIGHT_FLAG}
+    ${LIGHT_FLAG} ${SKIP_TOPOFUNC_FLAG}
 
 # ── Step 3: MPI benchmark (all 80 ranks) ─────────────────────────────────────
 echo ""
@@ -159,7 +171,7 @@ srun --mpi=pmi2 --ntasks=80 --nodes=1 python "${SCRIPT_DIR}/run_benchmark.py" \
     --out-dir   "${RESULTS_DIR}/mpi" \
     --nprocs    "${NPROCS}" \
     --modes     mpi \
-    ${LIGHT_FLAG}
+    ${LIGHT_FLAG} ${SKIP_TOPOFUNC_FLAG}
 
 # ── Step 4: Profiling report ──────────────────────────────────────────────────
 echo ""

@@ -192,6 +192,7 @@ def build_hfun(
     nprocs: int,
     execution_mode: str,
     light_features: bool = False,
+    skip_topofunc: bool = False,
 ):
     """Build an HfunCollector and apply all refinements.
 
@@ -206,6 +207,15 @@ def build_hfun(
     nprocs : int
         Worker count for parallel / MPI modes.
     execution_mode : {'serial', 'parallel', 'mpi'}
+    light_features : bool, default=False
+        If True, skip the global add_contour / add_channel refinements
+        (the O(tiles x segments) bottleneck).
+    skip_topofunc : bool, default=False
+        If True, skip add_topo_func_constraint. That constraint stores a
+        callable which forces OCSMesh's _apply_constraints to fall back to
+        SERIAL even in parallel/mpi modes (see collector.py). Skipping it
+        lets the constraint stage actually parallelize, and removes the
+        single most expensive serial step (~44 min/tile).
 
     Returns
     -------
@@ -284,7 +294,7 @@ def build_hfun(
             source_index=bound_idx,
         )
 
-    if func_idx:
+    if func_idx and not skip_topofunc:
         hfun.add_topo_func_constraint(
             func=_half_depth,     # module-level, picklable
             upper_bound=0.0,
@@ -293,6 +303,8 @@ def build_hfun(
             rate=0.05,
             source_index=func_idx,
         )
+    elif func_idx and skip_topofunc:
+        _logger.info("  topo_func_constraint SKIPPED (skip_topofunc=True)")
 
     if courant_idx:
         hfun.add_courant_num_constraint(

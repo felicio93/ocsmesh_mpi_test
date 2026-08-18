@@ -196,6 +196,7 @@ def _build_hfun(
     nprocs: int,
     execution_mode: str,
     light_features: bool = False,
+    skip_topofunc: bool = False,
 ) -> Hfun:
     """Construct the HfunCollector with all DEMs and all refinements."""
     raster_paths, raster_metas = recipe.load_ordered_rasters(manifest)
@@ -211,6 +212,7 @@ def _build_hfun(
         nprocs,
         execution_mode,
         light_features=light_features,
+        skip_topofunc=skip_topofunc,
     )
 
 
@@ -225,6 +227,7 @@ def _run_mode(
     mode: str,
     out_dir: Path,
     light_features: bool = False,
+    skip_topofunc: bool = False,
 ) -> Dict:
     """Run meshdata() for one benchmark mode.
 
@@ -260,6 +263,7 @@ def _run_mode(
         hfun = _build_hfun(
             manifest, domain_shape, effective_nprocs, ocsmesh_mode,
             light_features=light_features,
+            skip_topofunc=skip_topofunc,
         )
 
         # ── Profile + run ────────────────────────────────────────────
@@ -400,6 +404,16 @@ Modes
         ),
     )
     parser.add_argument(
+        "--skip-topofunc",
+        action="store_true",
+        help=(
+            "Skip add_topo_func_constraint. That constraint forces OCSMesh's "
+            "_apply_constraints to run SERIALLY even in parallel/mpi modes "
+            "(~44 min/tile). Skipping it lets the constraint stage parallelize "
+            "and removes the dominant serial bottleneck."
+        ),
+    )
+    parser.add_argument(
         "--hmin",
         type=float,
         default=GLOBAL_HMIN,
@@ -425,6 +439,7 @@ Modes
         _logger.info(f"nprocs           : {args.nprocs}  (serial_true always uses 1)")
         _logger.info(f"Modes            : {args.modes}")
         _logger.info(f"Light features   : {args.light_features}  (skip contour/channel if True)")
+        _logger.info(f"Skip topofunc    : {args.skip_topofunc}  (skip topo_func_constraint if True)")
         _logger.info(f"MPI active       : {_MPI_ACTIVE}  (size={_SIZE})")
         _logger.info(f"hmin={recipe.GLOBAL_HMIN} m  hmax={recipe.GLOBAL_HMAX} m")
 
@@ -474,6 +489,7 @@ Modes
             mode,
             args.out_dir,
             light_features=args.light_features,
+            skip_topofunc=args.skip_topofunc,
         )
 
         # Worker ranks return empty dict from _run_mode when meshdata()=None
