@@ -1,17 +1,128 @@
 # OCSMesh MPI Benchmark — STOFS-3D-Atlantic
 
-End-to-end test of the new OCSMesh MPI parallelization against the serial
-(multiprocessing) and multi-node modes, using real-world DEMs for the
-STOFS-3D-Atlantic domain on the NOAA RDHPC (Hercules).
+## What this is (read this first)
 
-All paths in this README and in the SLURM scripts are hard-wired to:
+This repository **benchmarks the new MPI parallelization in OCSMesh** against
+the older serial and multiprocessing execution modes, using real
+STOFS-3D-Atlantic Digital Elevation Models (DEMs) on the NOAA RDHPC
+(Hercules).
+
+**Why:** OCSMesh mesh generation can take many hours on large domains. A new
+MPI implementation distributes part of that work across many CPU cores /
+compute nodes. This benchmark answers two questions:
+
+1. **How much faster is MPI** than serial/multiprocessing for the stage it
+   parallelizes?
+2. **Which stages of the whole "DEM → mesh" pipeline are the real
+   bottlenecks** (i.e. what should be parallelized next)?
+
+If you have never seen this project before, read the "Mental model" and
+"How the benchmark works" sections below before running anything.
+
+---
+
+## Mental model: how OCSMesh builds a mesh
+
+OCSMesh turns raster elevation data (DEMs) into an unstructured triangular
+mesh in three conceptual stages:
 
 ```
-/work2/noaa/nos-surge/felicioc/OCSMesh_MPI
+   DEMs ─┬─► GEOM   (where to mesh: the land/water boundary polygon)
+         │
+         └─► HFUN   (how big each element should be: a "size function")
+                        │
+              GEOM + HFUN ─► MeshDriver ─► FINAL MESH (triangulated .2dm)
 ```
 
-If you use a different location, edit the `PROJ=` line below and the
-`PROJ=` line at the top of each SLURM script (and `final_config.sh`).
+- **Geom** (`GeomCollector`): extracts the domain boundary from the DEMs.
+- **Hfun** (`HfunCollector`): builds a *size function* — a field telling the
+  mesher how fine/coarse elements should be at each location. It is assembled
+  from many "refinements" (see below). Computing it (`hfun.meshdata()`) is the
+  expensive part, and **this is the stage the OCSMesh MPI implementation
+  parallelizes**.
+- **MeshDriver**: takes the geom + hfun and runs the meshing engine (Gmsh) to
+  produce the final triangulated mesh. This stage is **serial / global** in
+  OCSMesh (not MPI-parallelized) — profiling it tells us if it is a
+  bottleneck worth parallelizing next.
+
+### The refinements (what the Hfun recipe applies)
+
+`build_geom_and_hfun.py` is the "recipe" — it decides *what* size-function
+refinement is applied *where*. Per-CUDEM-tile refinements are assigned by tile
+index modulo 6:
+
+| `(cudem_pos) % 6` | Refinement | Cost |
+|---|---|---|
+| 0 | `add_subtidal_flow_limiter` | cheap |
+| 1 | `add_constant_value` | cheap |
+| 2 | `add_topo_bound_constraint` | **expensive (~3h/tile serial)** |
+| 3 | `add_topo_func_constraint` | **expensive + forces serial fallback** |
+| 4 | `add_courant_num_constraint` | **expensive (~3h/tile serial)** |
+| 5 | *skipped* | — |
+
+Plus global refinements applied to all tiles: `add_contour` (0 m + −200 m) and
+`add_channel` — these are an **O(tiles × contour-segments) bottleneck**. Plus
+fixed box refinements: `add_region_constraint`, `add_patch`, `add_feature`.
+
+**Key finding from this study:** the `topo_*`/`courant` constraints and the
+`contour`/`channel` steps dominate runtime and are largely serial. The
+recipe-trimming flags below exist to make the benchmark tractable.
+
+---
+
+## The execution modes being compared
+
+`run_benchmark.py --modes` accepts:
+
+| Mode | OCSMesh `execution_mode` | nprocs | What runs in parallel |
+|---|---|---|---|
+| `serial_mp` | `serial` | N | Only the Pool-based feature steps; per-tile meshdata is serial. This is the "baseline" — the slowest. |
+| `parallel` | `parallel` | N | All per-tile steps + meshdata via a local `multiprocessing.Pool` (single node). |
+| `mpi` | `mpi` | N | Per-tile meshdata dispatched across MPI ranks (can span nodes). **This is the implementation under test.** |
+
+(There is also `serial_true` = true single core, `nprocs=1`. It is available
+but not used in the current benchmark.)
+
+All modes run the **identical manifest + recipe**, so their output meshes must
+match — `analyze_profile.py` includes a numerical-equivalence check.
+
+---
+
+## How the benchmark works
+
+`run_benchmark.py` for each mode:
+
+1. (full pipeline only) builds the **Geom**
+2. builds the **Hfun** recipe
+3. runs `hfun.meshdata()` — **wrapped in cProfile**, because this is the
+   MPI-parallelized stage we most want to profile
+4. (full pipeline only) runs **`MeshDriver.run()`** to produce the final mesh
+5. writes outputs:
+   - `hfun_<mode>.2dm` — the size-function field (always)
+   - `mesh_<mode>.2dm` — the final triangulated mesh (full pipeline only)
+   - `profile_<mode>.prof` — cProfile binary (read with `pstats`/`snakeviz`)
+   - `benchmark_results.json` — timings, per-stage wall times, mesh stats
+6. `analyze_profile.py` merges the per-mode results into one
+   `benchmark_report.txt` with: timing table, speedups, per-stage wall-clock
+   breakdown, cProfile hotspots, and the equivalence check.
+
+### Recipe / pipeline flags (control cost)
+
+Because the full realistic recipe on many tiles takes far longer than an 8h
+SLURM job, these flags trim it:
+
+- `--light-features` — skip global `add_contour` + `add_channel`
+  (the O(tiles×segments) bottleneck).
+- `--skip-topofunc` — skip `add_topo_func_constraint` only. (That constraint
+  stores a callable that forces OCSMesh's constraint stage to run **serially
+  even in parallel/mpi**, so skipping it lets constraints parallelize.)
+- `--skip-constraints` — skip ALL of `topo_bound` + `topo_func` + `courant`.
+  Leaves only the two cheap per-tile refinements. Used for the smoke test.
+- `--full-pipeline` — run the COMPLETE workflow (geom + hfun + MeshDriver
+  final mesh) and record per-stage wall times. Off = hfun-only (faster).
+
+In the SLURM scripts these map to env toggles: `LIGHT_FEATURES`,
+`SKIP_TOPOFUNC`, `SKIP_CONSTRAINTS`, `FULL_PIPELINE`.
 
 ---
 
@@ -20,116 +131,42 @@ If you use a different location, edit the `PROJ=` line below and the
 ```
 ocsmesh_mpi_test/
 ├── download_dems.py            # download GEBCO + CUDEM 1/9" tiles
-├── trim_manifest.py            # cut a manifest down to N CUDEM tiles (+GEBCO)
-├── build_geom_and_hfun.py      # Geom/Hfun recipe (raster order + refinements)
-├── run_benchmark.py            # run serial_mp/parallel/mpi + cProfile
-├── analyze_profile.py          # build the human-readable report + stage breakdown
-├── slurm_single_node.sh        # SLURM: single node, smoke test (all modes)
-├── slurm_multi_node.sh         # SLURM: multi-node MPI (legacy)
-├── final_config.sh             # shared config sourced by all final jobs
-├── slurm_final_serial_mp.sh    # FINAL: serial_mp baseline (8h)
-├── slurm_final_parallel.sh     # FINAL: parallel/multiprocessing (8h)
-├── slurm_final_mpi_1node.sh    # FINAL: MPI single node (8h)
-├── slurm_final_mpi_multinode.sh# FINAL: MPI multi node (8h)
-├── slurm_final_mpi_stress.sh   # FINAL: MPI max-scale stress test (size after smoke)
+├── trim_manifest.py            # cut a manifest to N CUDEM tiles (+GEBCO)
+├── build_geom_and_hfun.py      # THE RECIPE: geom + hfun + refinements
+├── run_benchmark.py            # run modes + cProfile + per-stage timers
+├── analyze_profile.py          # build the human-readable report
+│
+├── slurm_single_node.sh        # SMOKE TEST (validate all modes, 1 node, 8h)
+├── final_config.sh             # shared config for all FINAL jobs
+├── slurm_profile_a_serial.sh   # PROFILE A: serial constraint cost (full recipe)
+├── slurm_final_serial_mp.sh    # PROFILE B: serial_mp baseline (meshdata)
+├── slurm_final_parallel.sh     # PROFILE B: multiprocessing
+├── slurm_final_mpi_1node.sh    # PROFILE B: MPI, 1 node
+├── slurm_final_mpi_multinode.sh# PROFILE B: MPI, multi-node scaling
+├── slurm_multi_node.sh         # (legacy multi-node MPI script)
+│
 ├── HERCULES_NOTES.md           # running log of HPC gotchas + OCSMesh feedback
 └── README.md
 ```
 
-`build_geom_and_hfun.py` is the module you edit to change *what* refinement
-goes *where*. `run_benchmark.py` just imports it.
+---
+
+## Requirements (READ — non-obvious)
+
+1. **OCSMesh branch `felicio/mpi-fixes`** (off `dev`). The MPI code and the
+   bug fixes this benchmark depends on live there. A plain `main`/`dev` clone
+   will NOT work.
+2. **Gmsh must be installed** in the conda env, or the meshing stage aborts
+   with `ImportError: Gmsh library not installed`.
+3. **mpi4py built from source** against the site Intel MPI (not a PyPI wheel).
+4. **TMPDIR must be forced to /work2 INSIDE each srun** — Hercules overrides
+   `TMPDIR` to a small node-local disk for every srun, which fills up when 80
+   ranks write raster temp files. See HERCULES_NOTES #10. The job scripts
+   already handle this.
 
 ---
 
-## Benchmark modes
-
-`run_benchmark.py --modes` accepts any of:
-
-| Mode         | ocsmesh `execution_mode` | nprocs | What is parallelized |
-|--------------|--------------------------|--------|----------------------|
-| `serial_mp`  | `serial`                 | N      | Pool-based feature steps only (contour/channel/flow/const); meshdata dispatch is serial |
-| `parallel`   | `parallel`               | N      | All per-tile steps + meshdata dispatch via multiprocessing.Pool |
-| `mpi`        | `mpi`                    | N      | meshdata dispatch via MPIExecutor across ranks (1 manager + N workers) |
-
-(There is also a `serial_true` mode — true single core, `nprocs=1` — but it
-is not used in the current benchmark.)
-
-All modes run the IDENTICAL manifest + recipe, so the resulting meshes must
-match (numerical-equivalence check in the report).
-
----
-
-## Required OCSMesh branch + Gmsh
-
-The MPI implementation and the fixes this benchmark depends on live on the
-**`felicio/mpi-fixes`** branch of `noaa-ocs-modeling/OCSMesh` (branched off
-`dev`). A plain `main`/`dev` clone will NOT work.
-
-Gmsh is the meshing engine and **must be installed in the conda env**, or
-the meshdata stage aborts with `ImportError: Gmsh library not installed`:
-
-```bash
-conda activate ocsmesh_mpi_test
-python -c "import gmsh" 2>&1 || pip install gmsh
-python -c "import gmsh; print('gmsh OK')"
-```
-
----
-
-## What is being tested
-
-**Global mesh size bounds:** `hmin = 1000 m` (finest), `hmax = 7000 m`
-(coarsest / background).
-
-**DEMs:** 1 GEBCO tile (full domain, 15", lowest priority) + CUDEM 1/9"
-tiles (every other tile per subfolder). CUDEM tiles override GEBCO where
-they overlap.
-
-**Per-source refinements — assigned by list index (modulo 6, CUDEM only):**
-
-| `(cudem_pos) % 6` | Refinement |
-|---|---|
-| 0 | `add_subtidal_flow_limiter` (hmin=1000, hmax=7000, −200→0 m) |
-| 1 | `add_constant_value` (1000 m, −5→0 m) |
-| 2 | `add_topo_bound_constraint` (1500 m, −2→1 m, min) |
-| 3 | `add_topo_func_constraint` (depth/2, −3000→0 m, min) |
-| 4 | `add_courant_num_constraint` (0.9, dt=150 s, amp=2 m) |
-| 5 | *skipped* |
-
-**Global refinements (all rasters):** `add_contour` (0 m + −200 m),
-`add_channel`.
-
-**Box-based refinements (fixed lat/lon):**
-- Box1 `(-85..-82, 25..31)` → `add_region_constraint` (max 3500 m)
-- Box2 `(-80..-77, 31..35)` → `add_patch` (1000 m) + `add_feature` (line)
-
----
-
-## Recipe cost knobs (IMPORTANT for fitting the 8h wall clock)
-
-Profiling on Hercules revealed two dominant, un-MPI-parallelized costs in
-the `exact` method. Two flags let you trim them:
-
-- **`--light-features`** (env `LIGHT_FEATURES=1`): skip the global
-  `add_contour` + `add_channel`. These are an O(tiles × contour-segments)
-  bottleneck; on the full recipe `_apply_features` alone can take many
-  hours even on a handful of tiles.
-
-- **`--skip-topofunc`** (env `SKIP_TOPOFUNC=1`, default ON in the smoke
-  script): skip `add_topo_func_constraint`. That constraint carries a
-  callable which forces OCSMesh's `_apply_constraints` to run **serially
-  even in parallel/mpi modes** (~44 min/tile). Skipping it removes the
-  single largest serial bottleneck AND lets the constraint stage actually
-  parallelize (so parallel/mpi show a real speedup on constraints).
-
-The per-tile `topo_bound` / `topo_func` / `courant` constraints are the
-most expensive step: each transforms the full-resolution raster
-coordinates through pyproj and does windowed KDTree/array math over tens of
-millions of points.
-
----
-
-## Step 1 — Set up shell environment (once per session)
+## Step 1 — Environment (once)
 
 ```bash
 export PROJ=/work2/noaa/nos-surge/felicioc/OCSMesh_MPI
@@ -137,18 +174,6 @@ export REPO=$PROJ/ocsmesh_mpi_test
 export DEMS=$PROJ/stofs_dems
 export SHP=$PROJ/inputs/stofs3.shp
 
-mkdir -p $PROJ
-```
-
----
-
-## Step 2 — Clone and install OCSMesh (editable) + clone this repo
-
-Editable install (`-e`) means any later `git pull`/branch switch in the
-OCSMesh repo is picked up immediately with no reinstall.
-
-```bash
-# Load the toolchain FIRST so mpi4py builds against the right MPI.
 module purge
 module load intel-oneapi-compilers/2022.2.1
 module load intel-oneapi-mpi/2021.7.1
@@ -156,201 +181,128 @@ module load hdf5/1.12.2
 module load netcdf-c/4.9.0
 module load netcdf-fortran/4.6.0
 
-# Activate the conda env. NOTE: source conda's init directly by its
-# hardcoded path — 'conda info --base' fails inside SLURM jobs because
-# conda is not on PATH at job start. The SLURM scripts use:
-#   source /work2/noaa/nos-surge/felicioc/envs/miniconda3/etc/profile.d/conda.sh
+# Source conda by its hardcoded path (conda is not on PATH in SLURM jobs).
 source /work2/noaa/nos-surge/felicioc/envs/miniconda3/etc/profile.d/conda.sh
 conda create -y -n ocsmesh_mpi_test python=3.10
 conda activate ocsmesh_mpi_test
 
-# --- Clone OCSMesh and check out the felicio/mpi-fixes branch ---
-# The MPI code + benchmark fixes live on felicio/mpi-fixes (off dev).
+# OCSMesh: clone and check out the required branch.
 cd $PROJ
 git clone https://github.com/noaa-ocs-modeling/OCSMesh.git
 cd OCSMesh
-git checkout felicio/mpi-fixes        # <-- REQUIRED
-git pull
-
-# --- Editable install of ocsmesh (core deps only) ---
-# Do NOT use the ".[mpi]" extra on HPC — it pulls a prebuilt mpi4py wheel
-# linked to a generic MPI that fails under srun. See HERCULES_NOTES #1/#2.
+git checkout felicio/mpi-fixes      # REQUIRED
 pip install -e .
 
-# --- Gmsh meshing engine (REQUIRED) ---
+# Gmsh meshing engine (REQUIRED).
 python -c "import gmsh" 2>&1 || pip install gmsh
 
-# --- Build mpi4py FROM SOURCE against the loaded Intel MPI module ---
-which mpicc                                  # must resolve to Intel MPI
+# mpi4py FROM SOURCE against Intel MPI.
 MPICC=$(which mpicc) pip install --no-binary=mpi4py --no-cache-dir mpi4py
 
-# Verify imports:
-python -c "import ocsmesh; print('ocsmesh at', ocsmesh.__file__)"
-python -c "from ocsmesh.mpi import MPIExecutor; print('ocsmesh.mpi OK')"
-
-# Verify mpi4py — MUST run under srun (bare 'python -c' aborts with
-# 'PMI2_Job_GetId returned 14'; see HERCULES_NOTES #3).
+# Verify (must run under srun, not bare python — see HERCULES_NOTES #3).
 srun --mpi=pmi2 -n 2 python -c \
   "from mpi4py import MPI; c=MPI.COMM_WORLD; print('rank', c.Get_rank(), 'of', c.Get_size())"
 
-# --- Clone this benchmark repo into $PROJ ---
 cd $PROJ
 git clone https://github.com/felicio93/ocsmesh_mpi_test.git
 ```
 
-> Editable install: `$PROJ/OCSMesh` is your live source tree. Update with
-> `cd $PROJ/OCSMesh && git pull` — no reinstall needed.
-
----
-
-## Step 3 — Download the DEMs
-
-Run on a login node (network required). Re-runnable: existing files are
-skipped.
-
-**GEBCO note:** the NCEI ETOPO2022 THREDDS server has no WCS, so the
-deep-ocean tile is NOT auto-downloaded (HERCULES_NOTES #5). Provide it:
-download a GEBCO grid for the domain from https://download.gebco.net/
-(GeoTIFF) and drop it in `$DEMS/gebco/` (auto-detected) or point
-`GEBCO_LOCAL` at it.
+## Step 2 — Download DEMs
 
 ```bash
 cd $REPO
 export GEBCO_LOCAL=$DEMS/gebco/gebco_2024_n56.0_s5.0_w-100.0_e-50.0.tif
-
-# The smoke SLURM script downloads a New-England subset automatically, but
-# you can also do it by hand:
+# (place the GEBCO GeoTIFF in $DEMS/gebco/ — see HERCULES_NOTES #5)
 python download_dems.py --out-dir $DEMS \
     --manifest $REPO/dem_manifest_smoke.json --only MA_NH_ME
 ```
 
----
+## Step 3 — Smoke test (validate everything works, ~fits 8h)
 
-## Step 4 — Single-node smoke test (fits 8h)
-
-`slurm_single_node.sh` is the validation run. It:
-
-1. Downloads the New-England smoke manifest if missing.
-2. Trims it to **7 tiles** (6 CUDEM = 1 per refinement class + 1 GEBCO)
-   via `trim_manifest.py`, so `serial_mp` fits in 8h.
-3. Runs `serial_mp` + `parallel` (single rank), then `mpi` (80 ranks).
-4. Writes results, `.2dm` meshes, cProfile, and a report.
-
-Env toggles (both applied to all modes so inputs stay identical):
-
-- `LIGHT_FEATURES=1` — skip contour/channel (recommended for fast smoke).
-- `SKIP_TOPOFUNC=1`  — skip topo_func_constraint (default ON; removes the
-  ~44 min/tile serial bottleneck).
+The smoke test runs all modes on a tiny 7-tile workload with the slow
+refinements skipped, in the order **MPI → parallel → serial_mp** (so the most
+important result arrives first). It trims the manifest automatically.
 
 ```bash
 cd $REPO
 mkdir -p logs
-LIGHT_FEATURES=1 sbatch slurm_single_node.sh
+sbatch slurm_single_node.sh          # SKIP_CONSTRAINTS=1, LIGHT_FEATURES=1 by default
 
-# Watch it:
 squeue -u $USER
-tail -f logs/bench_1node_*.err     # OCSMesh progress is on stderr
+tail -f logs/bench_1node_*.err       # OCSMesh progress prints to stderr
 ```
 
-Output: `$PROJ/results/single_node_<jobid>/` with
-`serial_parallel/` and `mpi/` subdirs, each containing
-`benchmark_results.json`, `profile_*.prof`, `hfun_*.2dm`, and the report.
+Success = you see `[mpi] DONE`, `[parallel] DONE`, `[serial_mp] DONE`, the
+equivalence check passes, and `hfun_<mode>.2dm` files are written under
+`$PROJ/results/single_node_<jobid>/`.
 
-> TMPDIR is set to `${RESULTS_DIR}/tmp` (on `/work2`, Lustre) for ALL
-> modes. Do NOT use node-local `/tmp` — 79 workers writing clipped rasters
-> overflow it and OCSMesh aborts with 'No space left on device'.
+## Step 4 — Final profiling (after smoke passes)
 
----
+Two profiles, because MPI only accelerates ONE stage:
 
-## Step 5 — Final per-mode runs (8h each)
-
-Once the smoke test passes, the final benchmark runs one mode per SLURM
-job, all sourcing `final_config.sh` (single source of truth for manifest,
-recipe flags, hmin/hmax). Edit `final_config.sh` to set the workload
-(`FINAL_MANIFEST` / `FINAL_N_CUDEM`) and recipe knobs, then:
+### Profile A — the serial constraint cost (why serial is slow)
+Full recipe, few tiles, serial_mp only, end-to-end. Shows the ~3h/tile
+constraint cost and the un-parallelized `_apply_features` / MeshDriver stages.
 
 ```bash
-cd $REPO
+sbatch slurm_profile_a_serial.sh
+```
+
+### Profile B — the MPI speedup (what MPI accelerates)
+`--light-features --skip-constraints`, ~18 tiles, all modes. Isolates the
+per-tile meshdata stage where MPI shines. Run one job per mode; they all
+`source final_config.sh` so they share the identical workload.
+
+```bash
 sbatch slurm_final_serial_mp.sh
 sbatch slurm_final_parallel.sh
 sbatch slurm_final_mpi_1node.sh
-sbatch slurm_final_mpi_multinode.sh    # edit --nodes for the scaling study
+sbatch slurm_final_mpi_multinode.sh   # edit --nodes for the scaling study
 ```
 
-Size the workload so `serial_mp` (the slowest, binding mode) fits in ~7h;
-the same manifest is then used by every mode for a valid comparison.
-
----
-
-## Step 6 — MPI stress test (push the implementation to its limits)
-
-`slurm_final_mpi_stress.sh` runs the full recipe on as many tiles / nodes
-as possible (MPI only — serial could never finish this in 8h). **Sizing is
-a placeholder**: set `STRESS_N_CUDEM` and `--nodes` after the MPI smoke
-test measures per-tile MPI cost and the rank-0-only `_apply_features`
-fraction (which caps the achievable speedup — see limitations).
-
----
-
-## Step 7 — Generate / combine reports
-
-The SLURM scripts already call `analyze_profile.py`. To combine multiple
-per-mode runs into one report (timing table, speedups, numerical
-equivalence check, and the pipeline stage breakdown):
+Then combine into one report:
 
 ```bash
-cd $REPO
 python analyze_profile.py \
     --results-dir $PROJ/results/final_serial_mp_<jobid> \
                   $PROJ/results/final_parallel_<jobid> \
                   $PROJ/results/final_mpi_1node_<jobid> \
+                  $PROJ/results/final_mpi_multinode_<jobid> \
     --out combined_report.txt
 ```
 
 ---
 
-## Output reference
+## Reading the outputs
 
-### `benchmark_results.json`
-Per-mode wall-clock time, node/triangle counts, hfun min/max/mean,
-`ocsmesh_execution_mode`, `effective_nprocs`, and speedup vs baseline.
-
-### `hfun_<mode>.2dm`
-The generated mesh for each mode, for visual comparison in QGIS. All modes
-should produce matching meshes.
-
-### cProfile `.prof` files
-```python
-import pstats
-p = pstats.Stats("profile_mpi.prof"); p.sort_stats("cumulative"); p.print_stats(30)
-```
-
-### report `.txt`
-Timing table + speedups, mesh-quality stats, numerical-equivalence check,
-top cProfile hotspots per mode, a CSV speedup table, and a **Pipeline Stage
-Breakdown** (self-time bucketed into geom_build / hfun_construct /
-apply_features / calc_write_meshdata / composite / mesh_write_2dm /
-raster_io / kdtree).
+- **`benchmark_report.txt`** — the human-readable summary: timing table,
+  speedups vs baseline, **per-stage wall-clock breakdown** (geom / hfun build /
+  hfun meshdata / MeshDriver), cProfile hotspots, and numerical-equivalence
+  check.
+- **`benchmark_results.json`** — machine-readable: per-mode wall time,
+  `stage_times_s`, node/triangle counts, hfun stats.
+- **`hfun_<mode>.2dm`** — the size-function field (open in QGIS).
+- **`mesh_<mode>.2dm`** — the final triangulated mesh (full pipeline; open in
+  QGIS). All modes should produce matching meshes.
+- **`profile_<mode>.prof`** — cProfile binary. Read with:
+  ```bash
+  python -c "import pstats; pstats.Stats('profile_mpi.prof').sort_stats('cumulative').print_stats(30)"
+  # or: snakeviz profile_mpi.prof
+  ```
 
 ---
 
-## Notes / known limitations
+## Known limitations / findings
 
-- **`add_topo_func_constraint` forces serial constraint application.** Its
-  stored callable can't be pickled for the Pool, so OCSMesh's
-  `_apply_constraints` falls back to serial even in parallel/mpi modes
-  (~44 min/tile). Use `--skip-topofunc` for tractable runs. (This is a real
-  OCSMesh limitation worth fixing.)
-- **The topo/courant constraints are the dominant cost** in the `exact`
-  method — full-resolution coordinate transforms + KDTree per tile.
-- **`_apply_features` runs on Rank 0 only** even in MPI mode (contours,
-  channels, flow limiters, constraints). Only the per-tile `meshdata()`
-  dispatch is MPI-distributed (`_calculate_and_write_hfun_to_disk`). This
-  caps the achievable MPI speedup (Amdahl) and is the next parallelization
-  target — see the `TODO(mpi)` markers in `ocsmesh/hfun/collector.py`.
+- **MPI parallelizes only `hfun.meshdata()`** (the per-tile size-function
+  computation). Geom build, `_apply_features` (contours/channels/constraints),
+  and `MeshDriver.run()` are **not** MPI-parallelized — they run on rank 0 /
+  serially. Amdahl's law therefore caps the achievable overall speedup; the
+  per-stage breakdown quantifies this.
+- **`add_topo_func_constraint` forces serial constraint application** even in
+  parallel/mpi (its callable can't be pickled for the Pool). ~3h/tile.
+- **The topo/courant constraints and contour/channel steps dominate** the
+  `exact` method's cost. These are the next parallelization targets.
 - **`method='fast'` is not MPI-enabled** — the benchmark uses `exact`.
-- **TMPDIR must be on shared `/work2`** (Lustre), never node-local `/tmp`.
-- On multi-node jobs, intermediate `.npz`/raster files are exchanged via
-  the shared filesystem; `MPIExecutor.verify_shared_filesystem()` checks
-  this at dispatch start and aborts early with a clear message otherwise.
-```
+- **TMPDIR must be forced to /work2 inside each srun** (Hercules node-local
+  scratch is small and fills up). See HERCULES_NOTES #10.

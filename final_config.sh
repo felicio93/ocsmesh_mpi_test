@@ -72,7 +72,17 @@ if [ "${SKIP_CONSTRAINTS}" = "1" ]; then
     SKIP_CONSTRAINTS_FLAG="--skip-constraints"
 fi
 
-ALL_FLAGS="${LIGHT_FLAG} ${SKIP_TOPOFUNC_FLAG} ${SKIP_CONSTRAINTS_FLAG}"
+# FULL_PIPELINE=1 runs the complete end-to-end workflow (geom + hfun +
+# MeshDriver final mesh) and records per-stage wall times. For the FINAL
+# benchmark this should be 1 so we profile every stage and generate the
+# actual mesh (mesh_<mode>.2dm) in addition to the hfun size field.
+FULL_PIPELINE="${FULL_PIPELINE:-1}"
+FULL_PIPELINE_FLAG=""
+if [ "${FULL_PIPELINE}" = "1" ]; then
+    FULL_PIPELINE_FLAG="--full-pipeline"
+fi
+
+ALL_FLAGS="${LIGHT_FLAG} ${SKIP_TOPOFUNC_FLAG} ${SKIP_CONSTRAINTS_FLAG} ${FULL_PIPELINE_FLAG}"
 
 # Global mesh size bounds (metres). Identical across all modes.
 HMIN="${HMIN:-1000.0}"
@@ -105,6 +115,7 @@ print_final_config() {
     echo "   LIGHT_FEATURES  : ${LIGHT_FEATURES}"
     echo "   SKIP_TOPOFUNC   : ${SKIP_TOPOFUNC}"
     echo "   SKIP_CONSTRAINTS: ${SKIP_CONSTRAINTS}"
+    echo "   FULL_PIPELINE   : ${FULL_PIPELINE}"
     echo "   hmin / hmax     : ${HMIN} / ${HMAX}"
     echo "   NPROCS          : ${NPROCS}"
     echo "================================================================="

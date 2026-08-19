@@ -131,7 +131,7 @@ logging.basicConfig(
 )
 _logger = logging.getLogger("stofs_benchmark")
 
-from ocsmesh import Hfun, Mesh, Raster
+from ocsmesh import Geom, Hfun, Mesh, MeshDriver, Raster
 from shapely.geometry import box, MultiPolygon, Polygon
 import geopandas as gpd
 
@@ -190,6 +190,19 @@ def _load_domain_shape(shapefile: Optional[Path]):
         return box(-100.0, 7.0, -50.0, 47.0)
 
 
+def _build_geom(manifest, domain_shape, nprocs):
+    """Build the GeomCollector (domain boundary) from the DEM manifest.
+
+    Only needed for the full end-to-end pipeline (MeshDriver.run()). The geom
+    defines WHERE to mesh (the land/water boundary); the hfun defines the
+    element SIZES. MeshDriver combines them to triangulate the final mesh.
+    """
+    raster_paths, _ = recipe.load_ordered_rasters(manifest)
+    if not raster_paths:
+        raise RuntimeError("No DEM files found for geom build.")
+    return recipe.build_geom(raster_paths, domain_shape, nprocs)
+
+
 def _build_hfun(
     manifest: Dict,
     domain_shape,
@@ -231,6 +244,7 @@ def _run_mode(
     light_features: bool = False,
     skip_topofunc: bool = False,
     skip_constraints: bool = False,
+    full_pipeline: bool = False,
 ) -> Dict:
     """Run meshdata() for one benchmark mode.
 
@@ -253,42 +267,81 @@ def _run_mode(
 
     prof = cProfile.Profile()
     t0 = time.perf_counter()
+    # Per-stage wall-clock timers. These directly answer benchmark goal #2:
+    # which pipeline stage dominates and therefore deserves parallelization.
+    stage_times = {}
 
     try:
         log.info(f"{'='*60}")
         log.info(f"Starting mode: {mode.upper()}")
         log.info(
             f"  ocsmesh execution_mode={ocsmesh_mode!r}  "
-            f"nprocs={effective_nprocs}"
+            f"nprocs={effective_nprocs}  full_pipeline={full_pipeline}"
         )
         log.info(f"{'='*60}")
 
+        # ── Stage 1: (optional) build the Geom (domain boundary) ─────
+        # Only needed for the full end-to-end pipeline. The geom is the
+        # land/water boundary the final mesh is triangulated inside.
+        geom = None
+        if full_pipeline:
+            t_geom = time.perf_counter()
+            geom = _build_geom(manifest, domain_shape, effective_nprocs)
+            stage_times["geom_build_s"] = round(time.perf_counter() - t_geom, 3)
+
+        # ── Stage 2: build the Hfun (size-function recipe) ───────────
+        t_hfun_build = time.perf_counter()
         hfun = _build_hfun(
             manifest, domain_shape, effective_nprocs, ocsmesh_mode,
             light_features=light_features,
             skip_topofunc=skip_topofunc,
             skip_constraints=skip_constraints,
         )
+        stage_times["hfun_build_s"] = round(time.perf_counter() - t_hfun_build, 3)
 
-        # ── Profile + run ────────────────────────────────────────────
+        # ── Stage 3: hfun.meshdata() — THE MPI-PARALLELIZED STAGE ────
+        # This is where OCSMesh's MPIExecutor distributes per-tile work.
+        # cProfile wraps only this call so the .prof isolates the stage
+        # the MPI implementation actually accelerates.
+        t_meshdata = time.perf_counter()
         prof.enable()
         meshdata = hfun.meshdata()
         prof.disable()
+        stage_times["hfun_meshdata_s"] = round(time.perf_counter() - t_meshdata, 3)
 
-        wall_time = time.perf_counter() - t0
-
-        # Workers return None from meshdata()
+        # MPI worker ranks return None from meshdata(); only rank 0 continues.
         if meshdata is None:
             return {}  # worker rank — caller handles
 
-        # ── Stats ────────────────────────────────────────────────────
+        # ── Stats on the hfun size-function field ────────────────────
         n_nodes = len(meshdata.coords)
         n_tria = len(meshdata.tria) if meshdata.tria is not None else 0
         vals = meshdata.values
+
+        # ── Stage 4: (optional) MeshDriver.run() — FINAL MESH ────────
+        # Global triangulation of the whole domain using geom + hfun.
+        # This is NOT MPI-parallelized in OCSMesh — it is a single serial
+        # engine call. Profiling it shows whether it is a bottleneck that
+        # would deserve parallelization next.
+        final_mesh = None
+        if full_pipeline and geom is not None:
+            t_driver = time.perf_counter()
+            log.info(f"[{mode}] Running MeshDriver (final mesh generation)...")
+            driver = MeshDriver(
+                geom, hfun, engine_name="gmsh",
+                bnd_representation="exact",
+            )
+            final_mesh = driver.run()
+            stage_times["meshdriver_run_s"] = round(
+                time.perf_counter() - t_driver, 3)
+
+        wall_time = time.perf_counter() - t0
+
         result = {
             "mode": mode,
             "ocsmesh_execution_mode": ocsmesh_mode,
             "effective_nprocs": effective_nprocs,
+            "full_pipeline": full_pipeline,
             "status": "success",
             "wall_time_s": round(wall_time, 3),
             "n_nodes": n_nodes,
@@ -297,25 +350,36 @@ def _run_mode(
             "hfun_max": float(np.max(vals)),
             "hfun_mean": float(np.mean(vals)),
             "hfun_std": float(np.std(vals)),
+            "stage_times_s": stage_times,
         }
         log.info(
             f"[{mode}] DONE in {wall_time:.1f}s  "
             f"nodes={n_nodes:,}  tria={n_tria:,}  "
             f"hfun=[{result['hfun_min']:.0f}, {result['hfun_max']:.0f}]"
         )
+        log.info(f"[{mode}] stage times (s): {stage_times}")
 
-        # ── Save cProfile ────────────────────────────────────────────
+        # ── Save cProfile (isolates the MPI-parallelized meshdata stage) ─
         prof_path = out_dir / f"profile_{mode}.prof"
         prof.dump_stats(str(prof_path))
         log.info(f"cProfile saved to {prof_path}")
 
-        # ── Save mesh as .2dm for QGIS inspection ────────────────────
-        mesh_path = out_dir / f"hfun_{mode}.2dm"
+        # ── Save the HFUN size-function field as .2dm (always) ───────
+        hfun_path = out_dir / f"hfun_{mode}.2dm"
         try:
-            Mesh(meshdata).write(str(mesh_path), overwrite=True, format='2dm')
-            log.info(f"Mesh saved to {mesh_path}")
+            Mesh(meshdata).write(str(hfun_path), overwrite=True, format='2dm')
+            log.info(f"Hfun size-field saved to {hfun_path}")
         except Exception as mesh_exc:  # pylint: disable=broad-exception-caught
-            log.warning(f"Could not save .2dm mesh: {mesh_exc}")
+            log.warning(f"Could not save hfun .2dm: {mesh_exc}")
+
+        # ── Save the FINAL MESH as .2dm (full pipeline only) ─────────
+        if final_mesh is not None:
+            final_path = out_dir / f"mesh_{mode}.2dm"
+            try:
+                final_mesh.write(str(final_path), format="2dm", overwrite=True)
+                log.info(f"Final mesh saved to {final_path}")
+            except Exception as mesh_exc:  # pylint: disable=broad-exception-caught
+                log.warning(f"Could not save final mesh .2dm: {mesh_exc}")
 
         # Also print top-20 cumulative to stdout
         sio = io.StringIO()
@@ -332,8 +396,10 @@ def _run_mode(
             "mode": mode,
             "ocsmesh_execution_mode": ocsmesh_mode,
             "effective_nprocs": effective_nprocs,
+            "full_pipeline": full_pipeline,
             "status": "failed",
             "wall_time_s": round(wall_time, 3),
+            "stage_times_s": stage_times,
             "error": repr(exc),
             "traceback": tb,
         }
@@ -428,6 +494,18 @@ Modes
         ),
     )
     parser.add_argument(
+        "--full-pipeline",
+        action="store_true",
+        help=(
+            "Run the COMPLETE end-to-end workflow: build Geom, build Hfun, "
+            "hfun.meshdata() (MPI-parallelized), then MeshDriver.run() to "
+            "triangulate the FINAL mesh, and write both hfun_<mode>.2dm and "
+            "mesh_<mode>.2dm. Records per-stage wall times (geom / hfun build / "
+            "hfun meshdata / MeshDriver run). Without this flag only the hfun "
+            "stage runs (faster; used for the smoke test)."
+        ),
+    )
+    parser.add_argument(
         "--hmin",
         type=float,
         default=GLOBAL_HMIN,
@@ -455,6 +533,7 @@ Modes
         _logger.info(f"Light features   : {args.light_features}  (skip contour/channel if True)")
         _logger.info(f"Skip topofunc    : {args.skip_topofunc}  (skip topo_func_constraint if True)")
         _logger.info(f"Skip constraints : {args.skip_constraints}  (skip all topo/courant constraints if True)")
+        _logger.info(f"Full pipeline    : {args.full_pipeline}  (geom + hfun + MeshDriver final mesh if True)")
         _logger.info(f"MPI active       : {_MPI_ACTIVE}  (size={_SIZE})")
         _logger.info(f"hmin={recipe.GLOBAL_HMIN} m  hmax={recipe.GLOBAL_HMAX} m")
 
@@ -506,6 +585,7 @@ Modes
             light_features=args.light_features,
             skip_topofunc=args.skip_topofunc,
             skip_constraints=args.skip_constraints,
+            full_pipeline=args.full_pipeline,
         )
 
         # Worker ranks return empty dict from _run_mode when meshdata()=None

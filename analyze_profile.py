@@ -225,6 +225,35 @@ def build_report(
                 lines.append(f"    hfun std  = {r.get('hfun_std', 'N/A'):.1f} m")
                 lines.append("")
 
+            # ── Per-stage WALL-CLOCK breakdown (from run_benchmark timers) ──
+            # These are the real wall times of each pipeline stage, recorded
+            # by run_benchmark.py (not cProfile). With --full-pipeline they
+            # include geom_build, hfun_build, hfun_meshdata (MPI-accelerated),
+            # and meshdriver_run (final mesh, NOT MPI-accelerated).
+            any_stage = any(r.get("stage_times_s") for r in summary.get("results", []))
+            if any_stage:
+                h("Per-stage wall-clock time (seconds)")
+                stage_keys = ["geom_build_s", "hfun_build_s",
+                              "hfun_meshdata_s", "meshdriver_run_s"]
+                header = "  {:<14}".format("mode") + "".join(
+                    f"{k.replace('_s',''):>18}" for k in stage_keys
+                ) + f"{'total':>12}"
+                lines.append(header)
+                lines.append("  " + "-" * (14 + 18 * len(stage_keys) + 12))
+                for r in summary.get("results", []):
+                    st = r.get("stage_times_s") or {}
+                    row = "  {:<14}".format(r["mode"])
+                    for k in stage_keys:
+                        v = st.get(k)
+                        row += f"{('—' if v is None else f'{v:.1f}'):>18}"
+                    row += f"{r.get('wall_time_s', 0):>12.1f}"
+                    lines.append(row)
+                lines.append("")
+                lines.append("  Note: hfun_meshdata is the MPI-parallelized stage.")
+                lines.append("  meshdriver_run (final mesh) is serial/global — a")
+                lines.append("  candidate bottleneck if it dominates.")
+                lines.append("")
+
             all_run_results.extend(summary.get("results", []))
 
             # ── cProfile hotspots ────────────────────────────────────────────

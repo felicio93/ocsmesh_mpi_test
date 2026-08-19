@@ -304,6 +304,170 @@ initialization to stay lazy until an MPI feature is actually invoked
 
 ---
 
+## #8 — `in_item.clip()` AttributeError on str/Path DEM inputs (OCSMesh bug)
+
+**Symptom**
+```
+AttributeError: 'str' object has no attribute 'clip'
+  File ".../ocsmesh/hfun/collector.py", line 1012, in __init__
+    in_item.clip(clip_shape)
+```
+
+**Root cause**
+In `HfunCollector.__init__`, when the input is a str/Path .tif, `in_item` is
+reassigned to `str(in_item)` and a `Raster` object is created separately as
+`raster = Raster(in_item)`. The base_shape clip branch then called
+`in_item.clip()` (on the plain string) instead of `raster.clip()`.
+
+**Workaround / fix**
+Fixed on `felicio/mpi-fixes`: call `raster.clip(clip_shape)` (matches the
+base_mesh branch just below). Every str/Path + base_shape call hit this.
+
+**OCSMesh-side?** Code fix needed (done on felicio/mpi-fixes).
+
+---
+
+## #9 — MPI failures cascade: mp start method + Pool workers initializing MPI
+
+**Symptom**
+Under a SLURM allocation, `--modes parallel` (multiprocessing) aborted with
+`PMI_Init returned 14` flooding stderr — one abort per Pool worker.
+
+**Root cause (two linked bugs)**
+1. `run_benchmark.py` imported `from ocsmesh.mpi import ...` BEFORE `import
+   ocsmesh`, bypassing `ocsmesh/__init__.py` which calls
+   `_configure_mpi_environment()`. So the multiprocessing start method was
+   never set to 'spawn'.
+2. Even after fixing (1), `set_start_method('spawn', force=False)` is a no-op
+   if the method was already locked to 'fork' by an earlier import. And the
+   spawned/forked Pool workers re-import ocsmesh, which (because SLURM sets
+   `SLURM_NTASKS`) made `_get_mpi_comm()` attempt `MPI_Init` in every worker —
+   but workers have no PMI server → abort.
+
+**Workaround / fix**
+- `run_benchmark.py`: `import ocsmesh` FIRST (runs `_configure_mpi_environment`).
+- `ocsmesh/mpi.py`: `set_start_method('spawn', force=True)`.
+- `ocsmesh/mpi.py`: `_get_mpi_comm()` returns None for non-'MainProcess'
+  processes (Pool workers), so MPI is never initialized in a worker.
+All on `felicio/mpi-fixes`.
+
+**OCSMesh-side?** Code fix needed (done). Also a UX note: MPI init as a side
+effect of import under a SLURM allocation is surprising.
+
+---
+
+## #10 — SLURM forces TMPDIR to node-local scratch inside srun → disk full
+
+**Symptom**
+MPI mode aborted early in `raster.clip()`:
+```
+_tiffWriteProc: No space left on device.
+rasterio.errors.RasterioIOError: Write failed.
+```
+`/work2` had 6.3 PB free, and the job's `${RESULTS_DIR}/mpi_tmp` was empty.
+
+**Root cause**
+OCSMesh sets its temp dir ONCE at import via `tempfile.gettempdir()` (reads
+`TMPDIR`). Hercules' SLURM prolog forces `TMPDIR=/local/scratch/$USER/$JOBID`
+(a small node-local disk) inside EVERY srun — and this overrides any exported
+`TMPDIR`, even `srun --export=ALL,TMPDIR=...`. With 80 MPI ranks each writing
+full-resolution clipped-raster .tif files to that small local disk, it fills
+up. (parallel mode with a single rank happened to fit, which is why only MPI
+failed.)
+
+**Proof (on Hercules):**
+```
+srun --export=ALL,TMPDIR=/work2/... bash -c 'python -c "import tempfile; print(tempfile.gettempdir())"'
+  -> /local/scratch/...           # overridden!
+srun bash -c 'export TMPDIR=/work2/...; python -c "import tempfile; print(tempfile.gettempdir())"'
+  -> /work2/...                   # sticks
+```
+
+**Workaround**
+Set `TMPDIR` INSIDE the rank shell, after the prolog runs:
+```bash
+srun --mpi=pmi2 --ntasks=80 bash -c "export TMPDIR='${MPI_TMPDIR}'; exec python run_benchmark.py ..."
+```
+All job scripts now wrap the python call this way.
+
+**OCSMesh-side?** Partially. Site config is the cause, but OCSMesh could
+expose a way to set its working/temp directory explicitly (rather than reading
+`TMPDIR` once at import), which would make HPC temp management robust.
+
+---
+
+## #11 — Gmsh not installed (meshing engine)
+
+**Symptom**
+```
+ImportError: Gmsh library not installed.
+  File ".../ocsmesh/engines/gmsh.py", line 31
+```
+Occurs only after `_apply_features` completes, at the `_calculate_and_write_
+hfun_to_disk` (meshing) stage — so a run can burn hours before hitting it.
+
+**Root cause**
+`gmsh` is a separate pip package and was not in the conda env.
+
+**Workaround**
+`pip install gmsh` in the env. Verify: `python -c "import gmsh"`.
+
+**OCSMesh-side?** Docs — Gmsh should be listed as a required runtime dep for
+the meshing engine in the OCSMesh install guide.
+
+---
+
+## #12 — `add_feature` crashes on empty channel points (OCSMesh bug)
+
+**Symptom**
+```
+ValueError: data must be of shape (n, m), where there are n points of dimension m
+  File ".../ocsmesh/hfun/raster.py", line 1229, in add_feature
+    tree = cKDTree(np.array(points))
+```
+Hit inside `_apply_channels` when `add_channel` found no channels on a tile.
+
+**Root cause**
+`add_feature` built a KDTree from an empty `points` list without guarding.
+
+**Workaround / fix**
+Fixed on `felicio/mpi-fixes`: skip the window when `len(points) == 0`.
+
+**OCSMesh-side?** Code fix needed (done).
+
+---
+
+## #13 — Runtime cost: constraints and contours dominate; MPI covers one stage
+
+**Observation (from this benchmark study, not a bug)**
+- `add_topo_bound_constraint`, `add_topo_func_constraint`, and
+  `add_courant_num_constraint` each cost ~3 h/tile in serial. They transform
+  the full-resolution raster coordinates through pyproj and do windowed KDTree
+  work per tile.
+- `add_topo_func_constraint` additionally forces `_apply_constraints` to run
+  SERIALLY even in parallel/mpi modes (its callable can't be pickled for the
+  Pool).
+- Global `add_contour` + `add_channel` are an O(tiles × contour-segments)
+  cost, also on rank 0.
+- The MPI implementation parallelizes `hfun.meshdata()`'s per-tile
+  triangulation (`_calculate_and_write_hfun_to_disk_mpi`) — NOT
+  `_apply_features` (constraints/contours) and NOT `MeshDriver.run()` (final
+  mesh). Both remain serial/rank-0.
+
+**Implication**
+Amdahl's law caps the overall speedup MPI can deliver on the realistic recipe.
+The benchmark therefore uses recipe-trimming flags (`--light-features`,
+`--skip-topofunc`, `--skip-constraints`) to keep runs tractable, and profiles
+two things separately:
+  - Profile A: the serial constraint cost (full recipe, serial_mp).
+  - Profile B: the MPI speedup on the meshdata stage (constraints skipped).
+
+**OCSMesh-side?** The next parallelization targets are `_apply_features`
+(constraints/contours) and possibly `MeshDriver.run()`. `TopoFuncConstraint`
+should use a picklable callable so the parallel constraint path isn't disabled.
+
+---
+
 ## Template for new entries
 
 ```
