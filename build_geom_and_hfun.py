@@ -193,6 +193,7 @@ def build_hfun(
     execution_mode: str,
     light_features: bool = False,
     skip_topofunc: bool = False,
+    skip_constraints: bool = False,
 ):
     """Build an HfunCollector and apply all refinements.
 
@@ -215,7 +216,13 @@ def build_hfun(
         callable which forces OCSMesh's _apply_constraints to fall back to
         SERIAL even in parallel/mpi modes (see collector.py). Skipping it
         lets the constraint stage actually parallelize, and removes the
-        single most expensive serial step (~44 min/tile).
+        single most expensive serial step (~3h/tile).
+    skip_constraints : bool, default=False
+        If True, skip ALL topo/courant constraints (topo_bound, topo_func,
+        courant_num). Combined with skip_topofunc (which it supersedes),
+        this leaves only flow_limiter + const_value — the two fast per-tile
+        refinements. Use for the smoke test so serial_mp fits in 8h while
+        still exercising the Gmsh meshdata path end-to-end.
 
     Returns
     -------
@@ -285,16 +292,19 @@ def build_hfun(
         )
 
     if bound_idx:
-        hfun.add_topo_bound_constraint(
-            value=1500.0,
-            upper_bound=1.0,
-            lower_bound=-2.0,
-            value_type="min",
-            rate=0.05,
-            source_index=bound_idx,
-        )
+        if skip_constraints:
+            _logger.info("  topo_bound_constraint SKIPPED (skip_constraints=True)")
+        else:
+            hfun.add_topo_bound_constraint(
+                value=1500.0,
+                upper_bound=1.0,
+                lower_bound=-2.0,
+                value_type="min",
+                rate=0.05,
+                source_index=bound_idx,
+            )
 
-    if func_idx and not skip_topofunc:
+    if func_idx and not (skip_topofunc or skip_constraints):
         hfun.add_topo_func_constraint(
             func=_half_depth,     # module-level, picklable
             upper_bound=0.0,
@@ -303,16 +313,19 @@ def build_hfun(
             rate=0.05,
             source_index=func_idx,
         )
-    elif func_idx and skip_topofunc:
-        _logger.info("  topo_func_constraint SKIPPED (skip_topofunc=True)")
+    elif func_idx and (skip_topofunc or skip_constraints):
+        _logger.info("  topo_func_constraint SKIPPED (skip_topofunc/skip_constraints=True)")
 
     if courant_idx:
-        hfun.add_courant_num_constraint(
-            upper_bound=0.9,
-            timestep=150.0,
-            wave_amplitude=2.0,
-            source_index=courant_idx,
-        )
+        if skip_constraints:
+            _logger.info("  courant_num_constraint SKIPPED (skip_constraints=True)")
+        else:
+            hfun.add_courant_num_constraint(
+                upper_bound=0.9,
+                timestep=150.0,
+                wave_amplitude=2.0,
+                source_index=courant_idx,
+            )
 
     # ── Global refinements: contour + channel (all rasters) ───────────
     # These are the O(tiles × contour-segments) bottleneck of the `exact`

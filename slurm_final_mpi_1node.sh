@@ -27,6 +27,14 @@
 set -euo pipefail
 source "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/final_config.sh"
 
+# Profile B: skip-constraints + light-features to isolate meshdata stage.
+# 18 CUDEM tiles — serial_mp ~7.5h (Gmsh only), parallel/mpi in minutes.
+LIGHT_FEATURES=1
+SKIP_CONSTRAINTS=1
+SKIP_TOPOFUNC=1
+ALL_FLAGS="--light-features --skip-constraints --skip-topofunc"
+MANIFEST="${PROFILE_B_MANIFEST}"
+
 RESULTS_DIR="${PROJ}/results/final_mpi_1node_${SLURM_JOB_ID}"
 mkdir -p "${RESULTS_DIR}" logs
 
@@ -47,7 +55,7 @@ srun --mpi=pmi2 --ntasks=80 --nodes=1 python "${SCRIPT_DIR}/run_benchmark.py" \
     --hmin      "${HMIN}" \
     --hmax      "${HMAX}" \
     --modes     mpi \
-    ${LIGHT_FLAG}
+    ${ALL_FLAGS}
 
 echo ""
 echo "--- Generating report (mpi 1node) ---"

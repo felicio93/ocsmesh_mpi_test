@@ -197,6 +197,7 @@ def _build_hfun(
     execution_mode: str,
     light_features: bool = False,
     skip_topofunc: bool = False,
+    skip_constraints: bool = False,
 ) -> Hfun:
     """Construct the HfunCollector with all DEMs and all refinements."""
     raster_paths, raster_metas = recipe.load_ordered_rasters(manifest)
@@ -213,6 +214,7 @@ def _build_hfun(
         execution_mode,
         light_features=light_features,
         skip_topofunc=skip_topofunc,
+        skip_constraints=skip_constraints,
     )
 
 
@@ -228,6 +230,7 @@ def _run_mode(
     out_dir: Path,
     light_features: bool = False,
     skip_topofunc: bool = False,
+    skip_constraints: bool = False,
 ) -> Dict:
     """Run meshdata() for one benchmark mode.
 
@@ -264,6 +267,7 @@ def _run_mode(
             manifest, domain_shape, effective_nprocs, ocsmesh_mode,
             light_features=light_features,
             skip_topofunc=skip_topofunc,
+            skip_constraints=skip_constraints,
         )
 
         # ── Profile + run ────────────────────────────────────────────
@@ -414,6 +418,16 @@ Modes
         ),
     )
     parser.add_argument(
+        "--skip-constraints",
+        action="store_true",
+        help=(
+            "Skip ALL topo/courant constraints (topo_bound, topo_func, courant). "
+            "Leaves only fast flow_limiter + const_value refinements. Use for "
+            "the smoke test so serial_mp fits in 8h while still exercising "
+            "the full Gmsh meshdata pipeline end-to-end."
+        ),
+    )
+    parser.add_argument(
         "--hmin",
         type=float,
         default=GLOBAL_HMIN,
@@ -440,6 +454,7 @@ Modes
         _logger.info(f"Modes            : {args.modes}")
         _logger.info(f"Light features   : {args.light_features}  (skip contour/channel if True)")
         _logger.info(f"Skip topofunc    : {args.skip_topofunc}  (skip topo_func_constraint if True)")
+        _logger.info(f"Skip constraints : {args.skip_constraints}  (skip all topo/courant constraints if True)")
         _logger.info(f"MPI active       : {_MPI_ACTIVE}  (size={_SIZE})")
         _logger.info(f"hmin={recipe.GLOBAL_HMIN} m  hmax={recipe.GLOBAL_HMAX} m")
 
@@ -490,6 +505,7 @@ Modes
             args.out_dir,
             light_features=args.light_features,
             skip_topofunc=args.skip_topofunc,
+            skip_constraints=args.skip_constraints,
         )
 
         # Worker ranks return empty dict from _run_mode when meshdata()=None

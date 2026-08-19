@@ -18,7 +18,7 @@
 #SBATCH --job-name=ocsmesh_final_mpi_multinode
 #SBATCH --account=nos-surge
 #SBATCH --partition=hercules
-#SBATCH --nodes=4
+#SBATCH --nodes=2
 #SBATCH --ntasks-per-node=80
 #SBATCH --cpus-per-task=1
 #SBATCH --exclusive
@@ -30,6 +30,14 @@
 
 set -euo pipefail
 source "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/final_config.sh"
+
+# Profile B: skip-constraints + light-features to isolate meshdata stage.
+# 18 CUDEM tiles — serial_mp ~7.5h (Gmsh only), parallel/mpi in minutes.
+LIGHT_FEATURES=1
+SKIP_CONSTRAINTS=1
+SKIP_TOPOFUNC=1
+ALL_FLAGS="--light-features --skip-constraints --skip-topofunc"
+MANIFEST="${PROFILE_B_MANIFEST}"
 
 RESULTS_DIR="${PROJ}/results/final_mpi_multinode_${SLURM_JOB_ID}"
 mkdir -p "${RESULTS_DIR}" logs
@@ -65,7 +73,7 @@ srun --mpi=pmi2 \
         --hmin      "${HMIN}" \
         --hmax      "${HMAX}" \
         --modes     mpi \
-        ${LIGHT_FLAG}
+        ${ALL_FLAGS}
 
 echo ""
 echo "--- Generating report (mpi multinode) ---"
