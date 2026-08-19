@@ -71,14 +71,13 @@ mkdir -p "${TMPDIR}"
 
 echo ""
 echo "--- Profile A: serial_mp, full recipe, ${PROFILE_A_N_CUDEM} CUDEM tiles ---"
-srun --mpi=pmi2 -n 1 python "${SCRIPT_DIR}/run_benchmark.py" \
-    --manifest  "${MANIFEST}" \
-    --shapefile "${STOFS_SHAPEFILE}" \
-    --out-dir   "${RESULTS_DIR}" \
-    --nprocs    "${NPROCS}" \
-    --hmin      "${HMIN}" \
-    --hmax      "${HMAX}" \
-    --modes     serial_mp
+srun --mpi=pmi2 -n 1 bash -c "\
+    export TMPDIR='${RESULTS_DIR}/tmp'; \
+    exec python '${SCRIPT_DIR}/run_benchmark.py' \
+        --manifest '${MANIFEST}' --shapefile '${STOFS_SHAPEFILE}' \
+        --out-dir '${RESULTS_DIR}' --nprocs '${NPROCS}' \
+        --hmin '${HMIN}' --hmax '${HMAX}' \
+        --modes serial_mp"
 
 echo ""
 echo "--- Generating Profile A report ---"

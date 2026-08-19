@@ -149,13 +149,14 @@ MPI_TMPDIR="${RESULTS_DIR}/mpi_tmp"
 mkdir -p "${MPI_TMPDIR}"
 export TMPDIR="${MPI_TMPDIR}"
 
-srun --mpi=pmi2 --ntasks=80 --nodes=1 python "${SCRIPT_DIR}/run_benchmark.py" \
-    --manifest "${MANIFEST}" \
-    --shapefile "${STOFS_SHAPEFILE}" \
-    --out-dir   "${RESULTS_DIR}/mpi" \
-    --nprocs    "${NPROCS}" \
-    --modes     mpi \
-    ${ALL_FLAGS}
+srun --mpi=pmi2 --ntasks=80 --nodes=1 bash -c "\
+    export TMPDIR='${MPI_TMPDIR}'; \
+    exec python '${SCRIPT_DIR}/run_benchmark.py' \
+        --manifest '${MANIFEST}' \
+        --shapefile '${STOFS_SHAPEFILE}' \
+        --out-dir '${RESULTS_DIR}/mpi' \
+        --nprocs '${NPROCS}' \
+        --modes mpi ${ALL_FLAGS}"
 
 # Reset TMPDIR back to the job scratch for the serial/parallel steps.
 export TMPDIR="${RESULTS_DIR}/tmp"
@@ -164,24 +165,26 @@ mkdir -p "${TMPDIR}"
 # ── Step 3: parallel benchmark (single rank, Pool workers) ───────────────────
 echo ""
 echo "--- Step 3: parallel benchmark (nprocs=${NPROCS}) ---"
-srun --mpi=pmi2 -n 1 python "${SCRIPT_DIR}/run_benchmark.py" \
-    --manifest "${MANIFEST}" \
-    --shapefile "${STOFS_SHAPEFILE}" \
-    --out-dir   "${RESULTS_DIR}/parallel" \
-    --nprocs    "${NPROCS}" \
-    --modes     parallel \
-    ${ALL_FLAGS}
+srun --mpi=pmi2 -n 1 bash -c "\
+    export TMPDIR='${RESULTS_DIR}/tmp'; \
+    exec python '${SCRIPT_DIR}/run_benchmark.py' \
+        --manifest '${MANIFEST}' \
+        --shapefile '${STOFS_SHAPEFILE}' \
+        --out-dir '${RESULTS_DIR}/parallel' \
+        --nprocs '${NPROCS}' \
+        --modes parallel ${ALL_FLAGS}"
 
 # ── Step 4: serial_mp benchmark (slowest — runs last) ────────────────────────
 echo ""
 echo "--- Step 4: serial_mp benchmark (baseline, slowest) ---"
-srun --mpi=pmi2 -n 1 python "${SCRIPT_DIR}/run_benchmark.py" \
-    --manifest "${MANIFEST}" \
-    --shapefile "${STOFS_SHAPEFILE}" \
-    --out-dir   "${RESULTS_DIR}/serial_mp" \
-    --nprocs    "${NPROCS}" \
-    --modes     serial_mp \
-    ${ALL_FLAGS}
+srun --mpi=pmi2 -n 1 bash -c "\
+    export TMPDIR='${RESULTS_DIR}/tmp'; \
+    exec python '${SCRIPT_DIR}/run_benchmark.py' \
+        --manifest '${MANIFEST}' \
+        --shapefile '${STOFS_SHAPEFILE}' \
+        --out-dir '${RESULTS_DIR}/serial_mp' \
+        --nprocs '${NPROCS}' \
+        --modes serial_mp ${ALL_FLAGS}"
 
 # ── Step 5: Profiling report ──────────────────────────────────────────────────
 echo ""

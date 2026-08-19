@@ -48,15 +48,13 @@ mkdir -p "${TMPDIR}"
 
 echo ""
 echo "--- FINAL parallel benchmark (nprocs=${NPROCS}) ---"
-srun --mpi=pmi2 -n 1 python "${SCRIPT_DIR}/run_benchmark.py" \
-    --manifest  "${MANIFEST}" \
-    --shapefile "${STOFS_SHAPEFILE}" \
-    --out-dir   "${RESULTS_DIR}" \
-    --nprocs    "${NPROCS}" \
-    --hmin      "${HMIN}" \
-    --hmax      "${HMAX}" \
-    --modes     parallel \
-    ${ALL_FLAGS}
+srun --mpi=pmi2 -n 1 bash -c "\
+    export TMPDIR='${RESULTS_DIR}/tmp'; \
+    exec python '${SCRIPT_DIR}/run_benchmark.py' \
+        --manifest '${MANIFEST}' --shapefile '${STOFS_SHAPEFILE}' \
+        --out-dir '${RESULTS_DIR}' --nprocs '${NPROCS}' \
+        --hmin '${HMIN}' --hmax '${HMAX}' \
+        --modes parallel ${ALL_FLAGS}"
 
 echo ""
 echo "--- Generating report (parallel) ---"

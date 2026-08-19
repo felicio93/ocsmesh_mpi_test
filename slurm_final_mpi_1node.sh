@@ -47,15 +47,13 @@ mkdir -p "${TMPDIR}"
 
 echo ""
 echo "--- FINAL MPI benchmark: 80 ranks on 1 node (nprocs=${NPROCS}) ---"
-srun --mpi=pmi2 --ntasks=80 --nodes=1 python "${SCRIPT_DIR}/run_benchmark.py" \
-    --manifest  "${MANIFEST}" \
-    --shapefile "${STOFS_SHAPEFILE}" \
-    --out-dir   "${RESULTS_DIR}" \
-    --nprocs    "${NPROCS}" \
-    --hmin      "${HMIN}" \
-    --hmax      "${HMAX}" \
-    --modes     mpi \
-    ${ALL_FLAGS}
+srun --mpi=pmi2 --ntasks=80 --nodes=1 bash -c "\
+    export TMPDIR='${RESULTS_DIR}/mpi_tmp'; \
+    exec python '${SCRIPT_DIR}/run_benchmark.py' \
+        --manifest '${MANIFEST}' --shapefile '${STOFS_SHAPEFILE}' \
+        --out-dir '${RESULTS_DIR}' --nprocs '${NPROCS}' \
+        --hmin '${HMIN}' --hmax '${HMAX}' \
+        --modes mpi ${ALL_FLAGS}"
 
 echo ""
 echo "--- Generating report (mpi 1node) ---"

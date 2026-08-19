@@ -65,15 +65,13 @@ srun --mpi=pmi2 \
      --nodes=${SLURM_NNODES} \
      --ntasks-per-node=80 \
      --distribution=cyclic \
-     python "${SCRIPT_DIR}/run_benchmark.py" \
-        --manifest  "${MANIFEST}" \
-        --shapefile "${STOFS_SHAPEFILE}" \
-        --out-dir   "${RESULTS_DIR}" \
-        --nprocs    "${NWORKERS}" \
-        --hmin      "${HMIN}" \
-        --hmax      "${HMAX}" \
-        --modes     mpi \
-        ${ALL_FLAGS}
+     bash -c "\
+        export TMPDIR='${RESULTS_DIR}/mpi_tmp'; \
+        exec python '${SCRIPT_DIR}/run_benchmark.py' \
+            --manifest '${MANIFEST}' --shapefile '${STOFS_SHAPEFILE}' \
+            --out-dir '${RESULTS_DIR}' --nprocs '${NWORKERS}' \
+            --hmin '${HMIN}' --hmax '${HMAX}' \
+            --modes mpi ${ALL_FLAGS}"
 
 echo ""
 echo "--- Generating report (mpi multinode) ---"
