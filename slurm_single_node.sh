@@ -67,6 +67,18 @@ if [ "${SKIP_TOPOFUNC}" = "1" ]; then
     echo "NOTE: SKIP_TOPOFUNC=1 -> topo_func_constraint SKIPPED"
 fi
 
+# SKIP_BOX_REFINEMENTS skips add_region_constraint/patch/feature (the
+# remaining serial bottleneck after --skip-constraints: ~29 min/run via
+# _apply_rate/KDTree on rank 0). Skipping isolates the pure Gmsh meshdata
+# dispatch — the only MPI-parallelized stage. Default ON for smoke test.
+# See HERCULES_NOTES #14.
+SKIP_BOX_REFINEMENTS="${SKIP_BOX_REFINEMENTS:-1}"
+SKIP_BOX_REFINEMENTS_FLAG=""
+if [ "${SKIP_BOX_REFINEMENTS}" = "1" ]; then
+    SKIP_BOX_REFINEMENTS_FLAG="--skip-box-refinements"
+    echo "NOTE: SKIP_BOX_REFINEMENTS=1 -> region_constraint/patch/feature SKIPPED"
+fi
+
 # SKIP_CONSTRAINTS skips ALL topo/courant constraints (~3h/tile serial).
 # Default ON for smoke test; turns OFF for profiling.
 SKIP_CONSTRAINTS="${SKIP_CONSTRAINTS:-1}"
@@ -76,7 +88,7 @@ if [ "${SKIP_CONSTRAINTS}" = "1" ]; then
     echo "NOTE: SKIP_CONSTRAINTS=1 -> topo_bound/topo_func/courant SKIPPED"
 fi
 
-ALL_FLAGS="${LIGHT_FLAG} ${SKIP_TOPOFUNC_FLAG} ${SKIP_CONSTRAINTS_FLAG}"
+ALL_FLAGS="${LIGHT_FLAG} ${SKIP_TOPOFUNC_FLAG} ${SKIP_CONSTRAINTS_FLAG} ${SKIP_BOX_REFINEMENTS_FLAG}"
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -124,17 +136,18 @@ else
     echo "--- Step 1: DEMs already downloaded (full smoke manifest found) ---"
 fi
 
-# ── Step 1b: Trim manifest to 7 tiles (6 CUDEM = 1 per class + 1 GEBCO) ──────
-# At ~25 min/tile Gmsh + ~3h/tile constraints, 7 tiles with SKIP_CONSTRAINTS=1
-# gives serial_mp ~3.5h total — fits in the 8h window.
-MANIFEST="${SCRIPT_DIR}/dem_manifest_smoke7.json"
+# ── Step 1b: Trim manifest to 15 tiles (14 CUDEM + 1 GEBCO) ─────────────────
+# With all skip flags ON (light+skip_constraints+skip_box_refinements), the
+# only work is flow_limiter + const_value (~8 min) + Gmsh meshdata dispatch.
+# 15 tiles serial_mp: ~22 min (15 x ~88s). Total all 3 modes: ~80 min.
+MANIFEST="${SCRIPT_DIR}/dem_manifest_smoke15.json"
 if [ ! -f "${MANIFEST}" ]; then
     echo ""
-    echo "--- Step 1b: Trimming smoke manifest to 7 tiles (1 per class) ---"
+    echo "--- Step 1b: Trimming smoke manifest to 15 tiles (meshdata-focused) ---"
     srun --mpi=pmi2 -n 1 python "${SCRIPT_DIR}/trim_manifest.py" \
         --in  "${FULL_SMOKE_MANIFEST}" \
         --out "${MANIFEST}" \
-        --n-cudem 6
+        --n-cudem 14
 else
     echo ""
     echo "--- Step 1b: Trimmed smoke manifest found ---"

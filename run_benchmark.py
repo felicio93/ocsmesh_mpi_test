@@ -211,6 +211,7 @@ def _build_hfun(
     light_features: bool = False,
     skip_topofunc: bool = False,
     skip_constraints: bool = False,
+    skip_box_refinements: bool = False,
 ) -> Hfun:
     """Construct the HfunCollector with all DEMs and all refinements."""
     raster_paths, raster_metas = recipe.load_ordered_rasters(manifest)
@@ -228,6 +229,7 @@ def _build_hfun(
         light_features=light_features,
         skip_topofunc=skip_topofunc,
         skip_constraints=skip_constraints,
+        skip_box_refinements=skip_box_refinements,
     )
 
 
@@ -244,6 +246,7 @@ def _run_mode(
     light_features: bool = False,
     skip_topofunc: bool = False,
     skip_constraints: bool = False,
+    skip_box_refinements: bool = False,
     full_pipeline: bool = False,
 ) -> Dict:
     """Run meshdata() for one benchmark mode.
@@ -296,6 +299,7 @@ def _run_mode(
             light_features=light_features,
             skip_topofunc=skip_topofunc,
             skip_constraints=skip_constraints,
+            skip_box_refinements=skip_box_refinements,
         )
         stage_times["hfun_build_s"] = round(time.perf_counter() - t_hfun_build, 3)
 
@@ -494,6 +498,20 @@ Modes
         ),
     )
     parser.add_argument(
+        "--skip-box-refinements",
+        action="store_true",
+        help=(
+            "Skip ALL fixed-box refinements: add_region_constraint (BOX1), "
+            "add_patch (BOX2), add_feature (BOX2 line). These all use the "
+            "expensive _apply_rate/KDTree distance-expansion path and run "
+            "serially on rank 0 even in MPI mode (~1718 s / 29 min measured "
+            "on job 9600559 with 7 tiles). Skipping them isolates the pure "
+            "Gmsh meshdata dispatch — the only stage MPI parallelizes — for "
+            "clean speedup measurement. Use for smoke test and Profile B; "
+            "leave OFF for Profile A (full realistic recipe). HERCULES_NOTES #14."
+        ),
+    )
+    parser.add_argument(
         "--full-pipeline",
         action="store_true",
         help=(
@@ -533,6 +551,7 @@ Modes
         _logger.info(f"Light features   : {args.light_features}  (skip contour/channel if True)")
         _logger.info(f"Skip topofunc    : {args.skip_topofunc}  (skip topo_func_constraint if True)")
         _logger.info(f"Skip constraints : {args.skip_constraints}  (skip all topo/courant constraints if True)")
+        _logger.info(f"Skip box-refs    : {args.skip_box_refinements}  (skip region_constraint/patch/feature if True)")
         _logger.info(f"Full pipeline    : {args.full_pipeline}  (geom + hfun + MeshDriver final mesh if True)")
         _logger.info(f"MPI active       : {_MPI_ACTIVE}  (size={_SIZE})")
         _logger.info(f"hmin={recipe.GLOBAL_HMIN} m  hmax={recipe.GLOBAL_HMAX} m")
@@ -585,6 +604,7 @@ Modes
             light_features=args.light_features,
             skip_topofunc=args.skip_topofunc,
             skip_constraints=args.skip_constraints,
+            skip_box_refinements=args.skip_box_refinements,
             full_pipeline=args.full_pipeline,
         )
 

@@ -194,6 +194,7 @@ def build_hfun(
     light_features: bool = False,
     skip_topofunc: bool = False,
     skip_constraints: bool = False,
+    skip_box_refinements: bool = False,
 ):
     """Build an HfunCollector and apply all refinements.
 
@@ -223,6 +224,18 @@ def build_hfun(
         this leaves only flow_limiter + const_value — the two fast per-tile
         refinements. Use for the smoke test so serial_mp fits in 8h while
         still exercising the Gmsh meshdata path end-to-end.
+    skip_box_refinements : bool, default=False
+        If True, skip the fixed-box refinements:
+          - add_region_constraint (BOX1: West FL shelf, rate=0.05)
+          - add_patch             (BOX2: SC/GA coast)
+          - add_feature           (line at BOX2 mid-latitude)
+        All three go through the expensive _apply_rate / KDTree distance
+        expansion path (~107 s/tile for region_constraint alone) and run
+        serially on rank 0 even in MPI mode. Measured on job 9600559:
+        these three cost ~1718 s serial (29 min) out of 3031 s total MPI
+        runtime. Skipping them isolates the pure Gmsh meshdata dispatch —
+        the only stage MPI actually parallelizes — for clean speedup
+        measurement. See HERCULES_NOTES #14.
 
     Returns
     -------
@@ -351,31 +364,39 @@ def build_hfun(
         )
 
     # ── Shape-based refinements: fixed boxes ──────────────────────────
-    _logger.info(f"  Box1 {BOX1}: add_region_constraint (max 3500 m)")
-    hfun.add_region_constraint(
-        value=3500.0,
-        shape=box(*BOX1),
-        crs="EPSG:4326",
-        value_type="max",
-        rate=0.05,
-    )
+    # These all go through expensive _apply_rate/KDTree paths. Skip them
+    # with skip_box_refinements=True to isolate the meshdata dispatch stage.
+    if skip_box_refinements:
+        _logger.info(
+            "  Box refinements SKIPPED (skip_box_refinements=True): "
+            "region_constraint, patch, feature"
+        )
+    else:
+        _logger.info(f"  Box1 {BOX1}: add_region_constraint (max 3500 m)")
+        hfun.add_region_constraint(
+            value=3500.0,
+            shape=box(*BOX1),
+            crs="EPSG:4326",
+            value_type="max",
+            rate=0.05,
+        )
 
-    _logger.info(f"  Box2 {BOX2}: add_patch (target 1000 m)")
-    hfun.add_patch(
-        shape=box(*BOX2),
-        expansion_rate=EXPANSION_RATE,
-        target_size=1000.0,
-    )
+        _logger.info(f"  Box2 {BOX2}: add_patch (target 1000 m)")
+        hfun.add_patch(
+            shape=box(*BOX2),
+            expansion_rate=EXPANSION_RATE,
+            target_size=1000.0,
+        )
 
-    # Line feature across box2 mid-latitude
-    mid_lat = (BOX2[1] + BOX2[3]) / 2.0
-    _logger.info(f"  Box2: add_feature (line at lat={mid_lat})")
-    hfun.add_feature(
-        shape=LineString([(BOX2[0], mid_lat), (BOX2[2], mid_lat)]),
-        expansion_rate=EXPANSION_RATE,
-        target_size=1000.0,
-        crs=4326,
-    )
+        # Line feature across box2 mid-latitude
+        mid_lat = (BOX2[1] + BOX2[3]) / 2.0
+        _logger.info(f"  Box2: add_feature (line at lat={mid_lat})")
+        hfun.add_feature(
+            shape=LineString([(BOX2[0], mid_lat), (BOX2[2], mid_lat)]),
+            expansion_rate=EXPANSION_RATE,
+            target_size=1000.0,
+            crs=4326,
+        )
 
     _logger.info("Hfun refinements applied.")
     return hfun

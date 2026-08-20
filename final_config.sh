@@ -72,6 +72,16 @@ if [ "${SKIP_CONSTRAINTS}" = "1" ]; then
     SKIP_CONSTRAINTS_FLAG="--skip-constraints"
 fi
 
+# SKIP_BOX_REFINEMENTS: skip region_constraint/patch/feature (expensive serial
+# path even after --skip-constraints: ~29 min/run via _apply_rate/KDTree on
+# rank 0, measured job 9600559). Default 1 for Profile B (isolate meshdata
+# dispatch); set 0 for Profile A (full realistic recipe). HERCULES_NOTES #14.
+SKIP_BOX_REFINEMENTS="${SKIP_BOX_REFINEMENTS:-1}"
+SKIP_BOX_REFINEMENTS_FLAG=""
+if [ "${SKIP_BOX_REFINEMENTS}" = "1" ]; then
+    SKIP_BOX_REFINEMENTS_FLAG="--skip-box-refinements"
+fi
+
 # FULL_PIPELINE=1 runs the complete end-to-end workflow (geom + hfun +
 # MeshDriver final mesh) and records per-stage wall times. For the FINAL
 # benchmark this should be 1 so we profile every stage and generate the
@@ -82,7 +92,7 @@ if [ "${FULL_PIPELINE}" = "1" ]; then
     FULL_PIPELINE_FLAG="--full-pipeline"
 fi
 
-ALL_FLAGS="${LIGHT_FLAG} ${SKIP_TOPOFUNC_FLAG} ${SKIP_CONSTRAINTS_FLAG} ${FULL_PIPELINE_FLAG}"
+ALL_FLAGS="${LIGHT_FLAG} ${SKIP_TOPOFUNC_FLAG} ${SKIP_CONSTRAINTS_FLAG} ${SKIP_BOX_REFINEMENTS_FLAG} ${FULL_PIPELINE_FLAG}"
 
 # Global mesh size bounds (metres). Identical across all modes.
 HMIN="${HMIN:-1000.0}"
@@ -115,6 +125,7 @@ print_final_config() {
     echo "   LIGHT_FEATURES  : ${LIGHT_FEATURES}"
     echo "   SKIP_TOPOFUNC   : ${SKIP_TOPOFUNC}"
     echo "   SKIP_CONSTRAINTS: ${SKIP_CONSTRAINTS}"
+    echo "   SKIP_BOX_REFS  : ${SKIP_BOX_REFINEMENTS}"
     echo "   FULL_PIPELINE   : ${FULL_PIPELINE}"
     echo "   hmin / hmax     : ${HMIN} / ${HMAX}"
     echo "   NPROCS          : ${NPROCS}"

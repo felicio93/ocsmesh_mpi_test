@@ -42,6 +42,10 @@ source "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/final_config
 LIGHT_FEATURES=0
 SKIP_TOPOFUNC=0
 SKIP_CONSTRAINTS=0
+LIGHT_FEATURES=0
+SKIP_TOPOFUNC=0
+SKIP_CONSTRAINTS=0
+SKIP_BOX_REFINEMENTS=0  # Profile A: full recipe including all box refinements
 ALL_FLAGS="--full-pipeline"   # full recipe + end-to-end (geom+hfun+MeshDriver)
 
 RESULTS_DIR="${PROJ}/results/profile_a_serial_${SLURM_JOB_ID}"

@@ -468,6 +468,64 @@ should use a picklable callable so the parallel constraint path isn't disabled.
 
 ---
 
+## #14 — `RegionConstraint._apply_rate` is the remaining serial bottleneck (not topo/courant)
+
+**Observation (measured on job 9600559, MPI mode, 7 tiles, --skip-constraints active)**
+
+Even with `--skip-constraints` (which skips topo_bound/topo_func/courant), the
+`add_region_constraint(value=3500, rate=0.05)` on BOX1 and the
+`add_patch`/`add_feature` on BOX2 ran serially on rank 0 in MPI mode and
+dominated the total runtime:
+
+```
+cProfile top-20 (mpi, 3031s total):
+    1    _apply_features           2295s  (rank 0 only)
+   30    apply_constraints         1770s  (HfunRaster.apply_constraints)
+    1    _apply_constraints_serial 1718s
+    7    RegionConstraint.apply    1658s
+    7    _apply_rate                756s  ← expensive: distance expansion
+   14    add_feature                497s  ← KDTree distance calc
+    1    _calculate_write_mpi       659s  ← MPI dispatch (the good part)
+    1    _dispatch                  616s  ← actual MPI parallelism
+```
+
+**Root cause**
+
+The `rate=0.05` parameter on `add_region_constraint` triggers
+`_apply_rate`: a per-window KDTree distance expansion across the full-
+resolution raster grid. Same expensive path as topo/courant constraints.
+Per-tile cost: ~107s (tottime) × 7 tiles = ~750s. With overhead: ~1718s
+serial in MPI mode (rank 0 only).
+
+`add_patch` and `add_feature` also go through `add_feature()` →
+`cKDTree` distance query → expensive (497s for add_feature, 452s for
+to_crs reprojection).
+
+**Comparison: parallel mode ran constraints in parallel**
+In the same job's parallel mode run (15:54 → 16:08):
+  `_apply_constraints_parallel`: 7 Pool workers → ~14 min (vs 29 min serial in MPI)
+This confirms Soroosh's point: Pool workers CAN parallelize constraints; the
+MPI mode currently does NOT use Pool workers for this step on rank 0.
+
+**Workaround**
+Use `--skip-box-refinements` to skip region_constraint, patch, and feature
+for smoke test and Profile B runs. This isolates the pure Gmsh meshdata
+dispatch (the stage MPI actually parallelizes). Keep OFF for Profile A
+(full realistic recipe — these box refinements are physically meaningful for
+the STOFS domain).
+
+Note: the box refinements belong OUTSIDE the MA/NH/ME smoke test region
+(BOX1 = West FL shelf, BOX2 = SC/GA coast), so they produce no visible
+effect on the smoke meshes but still cost ~29 min serial on rank 0.
+
+**OCSMesh-side?** Yes — `_apply_features` on rank 0 is the next
+parallelization target. Running `add_region_constraint`/`add_patch`/
+`add_feature` via Pool workers on rank 0 (as parallel mode already does
+for flow_limiter/const_value) would cut this ~2×; MPI-distributing it
+across ranks (the TODO(mpi) in collector.py) would cut it further.
+
+---
+
 ## Template for new entries
 
 ```
