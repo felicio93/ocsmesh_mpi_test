@@ -526,6 +526,165 @@ across ranks (the TODO(mpi) in collector.py) would cut it further.
 
 ---
 
+---
+
+## #15 — OCSMesh branch changes: mpi now uses parallel refinement path + gmsh boundary defaults to 'adapt'
+
+**Context (session 2025-08-20)**
+
+Two changes were made to `felicio/mpi-fixes` as a result of the smoke-matrix
+design work with Soroosh. Both fix performance/quality issues that the smoke
+matrix (HERCULES_NOTES #16) was designed to measure.
+
+### 15a — MPI now routes _apply_constraints / _apply_flow_limiters / _apply_const_val through the Pool-based parallel path
+
+**File:** `ocsmesh/hfun/collector.py` (three dispatch methods)
+
+**Before:**
+```python
+if self.execution_mode == 'parallel' and self._nprocs > 1:
+    self._apply_constraints_parallel()   # (and similarly for flow_limiters, const_val)
+else:
+    self._apply_constraints_serial()     # ← MPI fell here!
+```
+
+**After:**
+```python
+if self.execution_mode in ('parallel', 'mpi') and self._nprocs > 1:
+    self._apply_constraints_parallel()   # now reached in MPI mode too
+else:
+    self._apply_constraints_serial()
+```
+
+**Why this matters:**
+Prior to this fix, MPI mode fell through to the serial path for ALL three
+refinement dispatchers, even though OCSMesh already had a perfectly good
+Pool-based parallel implementation. The `_apply_features` call is guarded by
+`if is_manager:` upstream (collector.py:1077), so only rank 0 ever reaches
+these dispatchers — spawning a Pool there is safe. The net result:
+
+  MPI mode before: refinements serial on rank 0, meshdata MPI-distributed
+  MPI mode after:  refinements Pool-parallel on rank 0, meshdata MPI-distributed
+
+This makes MPI faster overall than pure `parallel` (which has Pool-parallel
+refinements but single-threaded per-tile meshdata dispatch), not just for the
+meshdata stage. The smoke-matrix Config C vs B (HERCULES_NOTES #16) directly
+measures this gain.
+
+**Caveat:** `TopoFuncConstraint` still auto-falls back to serial (its lambda
+can't be pickled for Pool). That's why topofunc is excluded from all
+smoke-matrix configs — see #16.
+
+### 15b — gmsh engine now defaults boundary representation to 'adapt'
+
+**File:** `ocsmesh/hfun/raster.py` (~line 298)
+
+**Before:**
+```python
+engine = get_mesh_engine(mesh_engine, **mesh_options)
+# → gmsh GmshOptions defaults to bnd_representation='fixed'
+```
+
+**After:**
+```python
+if mesh_engine == 'gmsh':
+    mesh_options.setdefault('bnd_representation', 'adapt')
+engine = get_mesh_engine(mesh_engine, **mesh_options)
+```
+
+**Why this matters:**
+`'adapt'` causes Gmsh to resample the tile boundary vertices to match the
+hfun resolution (via `utils.resample_geom_by_hfun`) BEFORE meshing. `'fixed'`
+locks the original dense boundary vertices as hard points, which can generate
+sliver triangles where the boundary resolution is much finer than the
+requested element size.
+
+`setdefault` means:
+- Callers that don't pass `bnd_representation` get `'adapt'` (the new default).
+- Callers that explicitly pass a different value are not affected.
+- Gated on `mesh_engine == 'gmsh'` because `TriangleOptions` does not accept
+  this kwarg and would raise `TypeError`.
+
+The smoke matrix (Config A/B: pure meshdata runs) is the first opportunity to
+measure whether this changes the hfun mesh quality metrics (node count, size
+field distribution, hfun_min/max).
+
+**OCSMesh-side?** Yes (done on felicio/mpi-fixes, commit 8d98df1).
+
+---
+
+## #16 — Smoke-test matrix: 4-config cost ladder for isolating pipeline stage costs
+
+**Context (session 2025-08-20)**
+
+After the OCSMesh branch changes (#15), a structured smoke-test matrix was
+designed to measure the effect of each change in isolation and to characterize
+the cost of each pipeline stage. Each config adds exactly one cost class:
+
+```
+Config   flow+const   constraints(no topofunc)   contour/channel+boxes   topo_func
+-------  -----------  ------------------------   ---------------------   ---------
+A         1/tile            -                              -                 -
+B         2/tile            -                              -                 -
+C         2/tile           yes                             -                 -
+D         2/tile           yes                            yes                -
+(full)    2/tile           yes                            yes               yes ← excluded (forces serial)
+```
+
+**What each comparison tells you:**
+
+- **B vs A:** Does applying 2 fast refinements per tile (instead of 1) change
+  the hfun quality or the meshdata dispatch time? Measures pure per-tile
+  meshdata overhead with maximum fast-refinement work.
+
+- **C vs B:** Did the OCSMesh #15a change (MPI now uses parallel constraints)
+  actually speed up the constraint stage? In C, `_apply_constraints` /
+  `_apply_flow_limiters` / `_apply_const_val` use the Pool path under MPI —
+  this comparison isolates whether that change is effective.
+
+- **D vs C:** What does global `add_contour` + `add_channel` + box refinements
+  add? These still run serially on rank 0 via `_apply_features` (the TODO(mpi)
+  in collector.py). This measures the still-un-parallelized serial bottleneck
+  and justifies the next OCSMesh development step.
+
+- **Within each config, mpi vs parallel vs serial_mp:** Direct mode comparison
+  on identical work. Config A/B (all-fast, no constraints) gives the cleanest
+  MPI speedup number because nothing routes through the slow/serial paths.
+
+**Config details:**
+
+| Config | `run_benchmark.py` flags | Description |
+|--------|--------------------------|-------------|
+| A | `--skip-constraints --skip-box-refinements --light-features` | modulo scheme, 1 fast ref/tile |
+| B | `--all-fast-refinements` | flow+const on EVERY tile (new flag) |
+| C | `--skip-topofunc --light-features` | adds topo_bound + courant via parallel Pool |
+| D | `--skip-topofunc` | adds global contour/channel + box refinements (serial) |
+
+**`--all-fast-refinements` (new flag, added this session):**
+Bypasses the index-modulo scheme and applies BOTH `add_subtidal_flow_limiter`
+AND `add_constant_value` to EVERY CUDEM tile. Forces all slow stages off
+(constraints, contour/channel, boxes) regardless of other skip flags. Both
+refinements are pickle-safe (no lambda) so parallel/mpi never fall back to
+serial. This is the cleanest possible "maximum fast-path" baseline.
+
+**Submitted via:** `slurm_smoke_matrix.sh` (new script, added this session).
+
+**To run all 4 configs × 3 modes (12 runs, 1 node, 8h budget):**
+```bash
+sbatch slurm_smoke_matrix.sh
+# or a subset:
+CONFIGS="A B" MODES="mpi parallel" sbatch slurm_smoke_matrix.sh
+```
+
+Results land in `$PROJ/results/smoke_matrix_<jobid>/config_<A|B|C|D>/<mode>/`.
+Per-config reports: `config_<X>/report_config_<X>.txt`.
+
+**OCSMesh-side?** The gap between Config C and D (serial `_apply_features` on
+rank 0) is the next parallelization target in OCSMesh. Config D vs C
+will quantify exactly how much it costs.
+
+---
+
 ## Template for new entries
 
 ```

@@ -212,6 +212,7 @@ def _build_hfun(
     skip_topofunc: bool = False,
     skip_constraints: bool = False,
     skip_box_refinements: bool = False,
+    all_fast_refinements: bool = False,
 ) -> Hfun:
     """Construct the HfunCollector with all DEMs and all refinements."""
     raster_paths, raster_metas = recipe.load_ordered_rasters(manifest)
@@ -230,6 +231,7 @@ def _build_hfun(
         skip_topofunc=skip_topofunc,
         skip_constraints=skip_constraints,
         skip_box_refinements=skip_box_refinements,
+        all_fast_refinements=all_fast_refinements,
     )
 
 
@@ -247,6 +249,7 @@ def _run_mode(
     skip_topofunc: bool = False,
     skip_constraints: bool = False,
     skip_box_refinements: bool = False,
+    all_fast_refinements: bool = False,
     full_pipeline: bool = False,
 ) -> Dict:
     """Run meshdata() for one benchmark mode.
@@ -300,6 +303,7 @@ def _run_mode(
             skip_topofunc=skip_topofunc,
             skip_constraints=skip_constraints,
             skip_box_refinements=skip_box_refinements,
+            all_fast_refinements=all_fast_refinements,
         )
         stage_times["hfun_build_s"] = round(time.perf_counter() - t_hfun_build, 3)
 
@@ -512,6 +516,20 @@ Modes
         ),
     )
     parser.add_argument(
+        "--all-fast-refinements",
+        action="store_true",
+        help=(
+            "Apply BOTH fast per-tile refinements (add_subtidal_flow_limiter "
+            "AND add_constant_value) to EVERY CUDEM tile, bypassing the "
+            "index-modulo scheme, and force all slow stages OFF (constraints, "
+            "contour/channel, boxes). This is the smoke-test 'no constraint, "
+            "2 refinements per tile' config: maximum per-tile work through the "
+            "two stages that were parallelized (_apply_flow_limiters, "
+            "_apply_const_val), both pickle-safe so parallel/mpi never fall "
+            "back to serial. Overrides --skip-* flags for the slow stages."
+        ),
+    )
+    parser.add_argument(
         "--full-pipeline",
         action="store_true",
         help=(
@@ -552,6 +570,7 @@ Modes
         _logger.info(f"Skip topofunc    : {args.skip_topofunc}  (skip topo_func_constraint if True)")
         _logger.info(f"Skip constraints : {args.skip_constraints}  (skip all topo/courant constraints if True)")
         _logger.info(f"Skip box-refs    : {args.skip_box_refinements}  (skip region_constraint/patch/feature if True)")
+        _logger.info(f"All fast refs    : {args.all_fast_refinements}  (flow+const on every tile, slow stages off if True)")
         _logger.info(f"Full pipeline    : {args.full_pipeline}  (geom + hfun + MeshDriver final mesh if True)")
         _logger.info(f"MPI active       : {_MPI_ACTIVE}  (size={_SIZE})")
         _logger.info(f"hmin={recipe.GLOBAL_HMIN} m  hmax={recipe.GLOBAL_HMAX} m")
@@ -605,6 +624,7 @@ Modes
             skip_topofunc=args.skip_topofunc,
             skip_constraints=args.skip_constraints,
             skip_box_refinements=args.skip_box_refinements,
+            all_fast_refinements=args.all_fast_refinements,
             full_pipeline=args.full_pipeline,
         )
 

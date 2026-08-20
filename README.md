@@ -118,11 +118,19 @@ SLURM job, these flags trim it:
   even in parallel/mpi**, so skipping it lets constraints parallelize.)
 - `--skip-constraints` — skip ALL of `topo_bound` + `topo_func` + `courant`.
   Leaves only the two cheap per-tile refinements. Used for the smoke test.
+- `--skip-box-refinements` — skip `add_region_constraint` / `add_patch` /
+  `add_feature`. All three use the expensive `_apply_rate`/KDTree distance
+  expansion (~29 min serial on rank 0 for 7 tiles, measured job 9600559).
+- `--all-fast-refinements` — apply **both** fast per-tile refinements
+  (`add_subtidal_flow_limiter` + `add_constant_value`) to **every** CUDEM tile,
+  bypassing the index-modulo scheme. Forces all slow stages OFF. Both
+  refinements are pickle-safe, so parallel/mpi never fall back to serial.
+  This is the "no constraint, 2 refinements per tile" smoke-matrix config.
 - `--full-pipeline` — run the COMPLETE workflow (geom + hfun + MeshDriver
   final mesh) and record per-stage wall times. Off = hfun-only (faster).
 
 In the SLURM scripts these map to env toggles: `LIGHT_FEATURES`,
-`SKIP_TOPOFUNC`, `SKIP_CONSTRAINTS`, `FULL_PIPELINE`.
+`SKIP_TOPOFUNC`, `SKIP_CONSTRAINTS`, `SKIP_BOX_REFINEMENTS`, `FULL_PIPELINE`.
 
 ---
 
@@ -137,6 +145,7 @@ ocsmesh_mpi_test/
 ├── analyze_profile.py          # build the human-readable report
 │
 ├── slurm_single_node.sh        # SMOKE TEST (validate all modes, 1 node, 8h)
+├── slurm_smoke_matrix.sh       # SMOKE MATRIX (4-config cost ladder × 3 modes)
 ├── final_config.sh             # shared config for all FINAL jobs
 ├── slurm_profile_a_serial.sh   # PROFILE A: serial constraint cost (full recipe)
 ├── slurm_final_serial_mp.sh    # PROFILE B: serial_mp baseline (meshdata)
@@ -219,7 +228,7 @@ python download_dems.py --out-dir $DEMS \
 
 ## Step 3 — Smoke test (validate everything works, ~fits 8h)
 
-The smoke test runs all modes on a tiny 7-tile workload with the slow
+The smoke test runs all modes on a small 15-tile workload with the slow
 refinements skipped, in the order **MPI → parallel → serial_mp** (so the most
 important result arrives first). It trims the manifest automatically.
 
@@ -235,6 +244,34 @@ tail -f logs/bench_1node_*.err       # OCSMesh progress prints to stderr
 Success = you see `[mpi] DONE`, `[parallel] DONE`, `[serial_mp] DONE`, the
 equivalence check passes, and `hfun_<mode>.2dm` files are written under
 `$PROJ/results/single_node_<jobid>/`.
+
+## Step 3b — Smoke-test matrix (4-config cost ladder)
+
+After the basic smoke test passes, run the cost-ladder matrix to isolate the
+contribution of each pipeline stage and measure the effect of the OCSMesh
+branch changes (mpi-parallel-path fix + gmsh adapt boundary):
+
+```
+Config   What runs                              Compared to previous config
+------   ------------------------------------   ---------------------------
+A        1 fast ref/tile (modulo)               baseline
+B        2 fast refs/tile (flow+const, every tile)  adds per-tile ref density
+C        + constraints (topo_bound + courant)   adds constraint stage via parallel Pool
+D        + global contour/channel + boxes       adds serial _apply_features (next MPI target)
+```
+
+`topo_func_constraint` is excluded from all configs (its lambda forces serial
+fallback, defeating the mode comparison).
+
+```bash
+sbatch slurm_smoke_matrix.sh          # all 4 configs × mpi + parallel + serial_mp
+
+# or a subset:
+CONFIGS="A B" MODES="mpi parallel" sbatch slurm_smoke_matrix.sh
+```
+
+Results: `$PROJ/results/smoke_matrix_<jobid>/config_<A|B|C|D>/<mode>/`
+Per-config reports: `config_<X>/report_config_<X>.txt`
 
 ## Step 4 — Final profiling (after smoke passes)
 
@@ -301,6 +338,14 @@ python analyze_profile.py \
   per-stage breakdown quantifies this.
 - **`add_topo_func_constraint` forces serial constraint application** even in
   parallel/mpi (its callable can't be pickled for the Pool). ~3h/tile.
+  Excluded from all smoke-matrix configs (see #16).
+- **MPI now uses Pool-based parallel refinements on rank 0** (OCSMesh
+  `felicio/mpi-fixes` commit 8d98df1, 2025-08-20). Before this fix, MPI fell
+  through to serial for `_apply_constraints` / `_apply_flow_limiters` /
+  `_apply_const_val`. The smoke-matrix Config C vs B measures this gain.
+- **gmsh boundary defaults to 'adapt'** (same commit). The tile boundary
+  vertices are now resampled to match the hfun resolution before meshing,
+  reducing sliver triangles.
 - **The topo/courant constraints and contour/channel steps dominate** the
   `exact` method's cost. These are the next parallelization targets.
 - **`method='fast'` is not MPI-enabled** — the benchmark uses `exact`.

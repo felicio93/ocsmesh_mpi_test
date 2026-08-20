@@ -195,6 +195,7 @@ def build_hfun(
     skip_topofunc: bool = False,
     skip_constraints: bool = False,
     skip_box_refinements: bool = False,
+    all_fast_refinements: bool = False,
 ):
     """Build an HfunCollector and apply all refinements.
 
@@ -237,6 +238,18 @@ def build_hfun(
         the only stage MPI actually parallelizes — for clean speedup
         measurement. See HERCULES_NOTES #14.
 
+    all_fast_refinements : bool, default=False
+        If True, apply BOTH fast per-tile refinements (add_subtidal_flow_limiter
+        AND add_constant_value) to EVERY CUDEM tile, bypassing the index-modulo
+        scheme, and skip all slow refinements (constraints, contour/channel,
+        boxes) regardless of the other skip flags. This gives the smoke-test
+        "no constraint, 2 refinements per tile" configuration: every tile
+        exercises the two refinement stages you parallelized
+        (_apply_flow_limiters, _apply_const_val) with the maximum per-tile
+        work, and nothing routes through the slow _apply_rate/KDTree or
+        _apply_features paths. Both flow_limiter and constant_value are
+        pickle-safe, so parallel/mpi never fall back to serial.
+
     Returns
     -------
     Hfun (HfunCollector)
@@ -278,6 +291,30 @@ def build_hfun(
     func_idx    = classes[3]
     courant_idx = classes[4]
     skip_idx    = classes[5]
+
+    # ── all_fast_refinements: 2 fast refs on EVERY tile, nothing slow ──
+    # Overrides the modulo assignment and forces every slow stage off so
+    # only _apply_flow_limiters + _apply_const_val run (both pickle-safe,
+    # so parallel/mpi never fall back to serial). This is the smoke-test
+    # "no constraint, 2 refinements per tile" configuration.
+    if all_fast_refinements:
+        all_cudem_idx = [
+            i for i, meta in enumerate(raster_metas)
+            if meta.get("source") != "gebco"
+        ]
+        flow_idx  = list(all_cudem_idx)
+        const_idx = list(all_cudem_idx)
+        bound_idx = func_idx = courant_idx = []
+        skip_idx  = []
+        # Force all slow stages off regardless of caller's other flags.
+        skip_constraints = True
+        skip_box_refinements = True
+        light_features = True
+        _logger.info(
+            "  all_fast_refinements=True → flow_limiter + const_value on "
+            f"ALL {len(all_cudem_idx)} CUDEM tiles; constraints, "
+            "contour/channel, and box refinements SKIPPED."
+        )
 
     _logger.info("  Index-modulo assignment (CUDEM tiles):")
     _logger.info(f"    flow_limiter    : {len(flow_idx)} tiles")
