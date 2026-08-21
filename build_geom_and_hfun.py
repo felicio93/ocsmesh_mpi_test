@@ -389,14 +389,14 @@ def build_hfun(
         hfun.add_contour(
             level=[0.0, -200.0],
             expansion_rate=EXPANSION_RATE,
-            target_size=1500.0,
+            target_size=3500.0,
         )
 
         _logger.info("  Global: add_channel")
         hfun.add_channel(
             level=0.0,
             width=1000.0,
-            target_size=1000.0,
+            target_size=3500.0,
             expansion_rate=EXPANSION_RATE,
         )
 
