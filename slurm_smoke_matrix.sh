@@ -16,7 +16,7 @@
 #   B         2 per tile        -                          -            -
 #   C         2 per tile        yes                        -            -
 #   D         2 per tile        yes                        yes          yes
-#
+#   E         -                 -                          -            -    (no constraints, no box)
 #   A  "no constraint, 1 refinement per tile"  (modulo scheme, one class/tile)
 #        flags: --skip-constraints --skip-box-refinements --light-features
 #   B  "no constraint, 2 refinements per tile" (flow+const on EVERY tile)
@@ -65,7 +65,7 @@
 #SBATCH --mail-user=felicio.cassalho@noaa.gov
 
 # ── Paths (edit only if your layout differs) ─────────────────────────────────
-PROJ="/work2/noaa/nos-surge/felicioc/OCSMesh_MPI"
+PROJ=${PROJ:-"/work2/noaa/nos-surge/felicioc/OCSMesh_MPI"}
 CONDA_ENV="ocsmesh_mpi_test"
 STOFS_SHAPEFILE="${PROJ}/inputs/stofs3.shp"
 DEM_OUT_DIR="${PROJ}/stofs_dems"
@@ -154,6 +154,7 @@ config_flags() {
         B) echo "--all-fast-refinements" ;;
         C) echo "--skip-topofunc --light-features" ;;
         D) echo "--skip-topofunc" ;;
+	E) echo "--skip-constraints --skip-box-refinements" ;;
         *) echo "__INVALID__" ;;
     esac
 }
@@ -164,6 +165,7 @@ config_desc() {
         B) echo "no constraint, 2 refinements/tile" ;;
         C) echo "with constraints (no topofunc), no global features" ;;
         D) echo "full recipe minus topofunc (adds contour/channel + boxes)" ;;
+	E) echo "no constraints, no box" ;;
         *) echo "INVALID" ;;
     esac
 }

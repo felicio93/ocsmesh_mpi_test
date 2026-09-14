@@ -40,7 +40,7 @@
 #SBATCH --mail-user=felicio.cassalho@noaa.gov
 
 # ── Paths (edit only if your layout differs) ─────────────────────────────────
-PROJ="/work2/noaa/nos-surge/felicioc/OCSMesh_MPI"
+PROJ=${PROJ:-"/work2/noaa/nos-surge/felicioc/OCSMesh_MPI"}
 CONDA_ENV="ocsmesh_mpi_test"
 STOFS_SHAPEFILE="${PROJ}/inputs/stofs3.shp"
 DEM_OUT_DIR="${PROJ}/stofs_dems"
