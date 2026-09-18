@@ -1,0 +1,392 @@
+{
+  "gebco": {
+    "name": "gebco",
+    "subfolder": "gebco",
+    "filename": "gebco_2024_n56.0_s5.0_w-100.0_e-50.0.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/gebco/gebco_2024_n56.0_s5.0_w-100.0_e-50.0.tif",
+    "url": "n/a",
+    "source": "gebco",
+    "available": true,
+    "priority": 0
+  },
+  "MA_NH_ME/ncei19_n41x25_w070x00_2021v1": {
+    "name": "MA_NH_ME/ncei19_n41x25_w070x00_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n41x25_w070x00_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n41x25_w070x00_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n41x25_w070x00_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 1
+  },
+  "MA_NH_ME/ncei19_n41x50_w070x00_2021v1": {
+    "name": "MA_NH_ME/ncei19_n41x50_w070x00_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n41x50_w070x00_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n41x50_w070x00_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n41x50_w070x00_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 2
+  },
+  "MA_NH_ME/ncei19_n41x50_w070x50_2021v1": {
+    "name": "MA_NH_ME/ncei19_n41x50_w070x50_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n41x50_w070x50_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n41x50_w070x50_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n41x50_w070x50_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 3
+  },
+  "MA_NH_ME/ncei19_n41x75_w070x25_2021v1": {
+    "name": "MA_NH_ME/ncei19_n41x75_w070x25_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n41x75_w070x25_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n41x75_w070x25_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n41x75_w070x25_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 4
+  },
+  "MA_NH_ME/ncei19_n42x00_w070x00_2021v1": {
+    "name": "MA_NH_ME/ncei19_n42x00_w070x00_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n42x00_w070x00_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n42x00_w070x00_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n42x00_w070x00_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 5
+  },
+  "MA_NH_ME/ncei19_n42x00_w070x50_2021v1": {
+    "name": "MA_NH_ME/ncei19_n42x00_w070x50_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n42x00_w070x50_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n42x00_w070x50_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n42x00_w070x50_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 6
+  },
+  "MA_NH_ME/ncei19_n42x25_w070x25_2021v1": {
+    "name": "MA_NH_ME/ncei19_n42x25_w070x25_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n42x25_w070x25_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n42x25_w070x25_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n42x25_w070x25_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 7
+  },
+  "MA_NH_ME/ncei19_n42x25_w071x00_2021v1": {
+    "name": "MA_NH_ME/ncei19_n42x25_w071x00_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n42x25_w071x00_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n42x25_w071x00_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n42x25_w071x00_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 8
+  },
+  "MA_NH_ME/ncei19_n42x50_w071x00_2021v1": {
+    "name": "MA_NH_ME/ncei19_n42x50_w071x00_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n42x50_w071x00_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n42x50_w071x00_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n42x50_w071x00_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 9
+  },
+  "MA_NH_ME/ncei19_n42x75_w070x75_2021v1": {
+    "name": "MA_NH_ME/ncei19_n42x75_w070x75_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n42x75_w070x75_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n42x75_w070x75_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n42x75_w070x75_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 10
+  },
+  "MA_NH_ME/ncei19_n42x75_w071x25_2021v1": {
+    "name": "MA_NH_ME/ncei19_n42x75_w071x25_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n42x75_w071x25_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n42x75_w071x25_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n42x75_w071x25_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 11
+  },
+  "MA_NH_ME/ncei19_n43x00_w071x00_2021v1": {
+    "name": "MA_NH_ME/ncei19_n43x00_w071x00_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n43x00_w071x00_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n43x00_w071x00_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n43x00_w071x00_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 12
+  },
+  "MA_NH_ME/ncei19_n43x25_w070x50_2021v1": {
+    "name": "MA_NH_ME/ncei19_n43x25_w070x50_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n43x25_w070x50_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n43x25_w070x50_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n43x25_w070x50_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 13
+  },
+  "MA_NH_ME/ncei19_n43x25_w071x00_2021v1": {
+    "name": "MA_NH_ME/ncei19_n43x25_w071x00_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n43x25_w071x00_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n43x25_w071x00_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n43x25_w071x00_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 14
+  },
+  "MA_NH_ME/ncei19_n43x50_w070x75_2021v1": {
+    "name": "MA_NH_ME/ncei19_n43x50_w070x75_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n43x50_w070x75_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n43x50_w070x75_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n43x50_w070x75_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 15
+  },
+  "MA_NH_ME/ncei19_n43x75_w070x25_2021v1": {
+    "name": "MA_NH_ME/ncei19_n43x75_w070x25_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n43x75_w070x25_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n43x75_w070x25_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n43x75_w070x25_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 16
+  },
+  "MA_NH_ME/ncei19_n43x75_w070x75_2021v1": {
+    "name": "MA_NH_ME/ncei19_n43x75_w070x75_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n43x75_w070x75_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n43x75_w070x75_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n43x75_w070x75_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 17
+  },
+  "MA_NH_ME/ncei19_n44x00_w068x75_2021v1": {
+    "name": "MA_NH_ME/ncei19_n44x00_w068x75_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n44x00_w068x75_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n44x00_w068x75_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n44x00_w068x75_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 18
+  },
+  "MA_NH_ME/ncei19_n44x00_w069x25_2021v1": {
+    "name": "MA_NH_ME/ncei19_n44x00_w069x25_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n44x00_w069x25_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n44x00_w069x25_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n44x00_w069x25_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 19
+  },
+  "MA_NH_ME/ncei19_n44x00_w069x75_2021v1": {
+    "name": "MA_NH_ME/ncei19_n44x00_w069x75_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n44x00_w069x75_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n44x00_w069x75_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n44x00_w069x75_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 20
+  },
+  "MA_NH_ME/ncei19_n44x00_w070x25_2021v1": {
+    "name": "MA_NH_ME/ncei19_n44x00_w070x25_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n44x00_w070x25_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n44x00_w070x25_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n44x00_w070x25_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 21
+  },
+  "MA_NH_ME/ncei19_n44x25_w068x25_2021v1": {
+    "name": "MA_NH_ME/ncei19_n44x25_w068x25_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n44x25_w068x25_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n44x25_w068x25_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n44x25_w068x25_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 22
+  },
+  "MA_NH_ME/ncei19_n44x25_w068x75_2021v1": {
+    "name": "MA_NH_ME/ncei19_n44x25_w068x75_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n44x25_w068x75_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n44x25_w068x75_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n44x25_w068x75_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 23
+  },
+  "MA_NH_ME/ncei19_n44x25_w069x25_2021v1": {
+    "name": "MA_NH_ME/ncei19_n44x25_w069x25_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n44x25_w069x25_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n44x25_w069x25_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n44x25_w069x25_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 24
+  },
+  "MA_NH_ME/ncei19_n44x25_w069x75_2021v1": {
+    "name": "MA_NH_ME/ncei19_n44x25_w069x75_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n44x25_w069x75_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n44x25_w069x75_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n44x25_w069x75_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 25
+  },
+  "MA_NH_ME/ncei19_n44x50_w067x00_2021v1": {
+    "name": "MA_NH_ME/ncei19_n44x50_w067x00_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n44x50_w067x00_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n44x50_w067x00_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n44x50_w067x00_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 26
+  },
+  "MA_NH_ME/ncei19_n44x50_w067x75_2021v1": {
+    "name": "MA_NH_ME/ncei19_n44x50_w067x75_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n44x50_w067x75_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n44x50_w067x75_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n44x50_w067x75_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 27
+  },
+  "MA_NH_ME/ncei19_n44x50_w068x25_2021v1": {
+    "name": "MA_NH_ME/ncei19_n44x50_w068x25_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n44x50_w068x25_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n44x50_w068x25_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n44x50_w068x25_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 28
+  },
+  "MA_NH_ME/ncei19_n44x50_w068x75_2021v1": {
+    "name": "MA_NH_ME/ncei19_n44x50_w068x75_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n44x50_w068x75_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n44x50_w068x75_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n44x50_w068x75_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 29
+  },
+  "MA_NH_ME/ncei19_n44x50_w069x25_2021v1": {
+    "name": "MA_NH_ME/ncei19_n44x50_w069x25_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n44x50_w069x25_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n44x50_w069x25_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n44x50_w069x25_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 30
+  },
+  "MA_NH_ME/ncei19_n44x75_w067x00_2021v1": {
+    "name": "MA_NH_ME/ncei19_n44x75_w067x00_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n44x75_w067x00_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n44x75_w067x00_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n44x75_w067x00_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 31
+  },
+  "MA_NH_ME/ncei19_n44x75_w067x50_2021v1": {
+    "name": "MA_NH_ME/ncei19_n44x75_w067x50_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n44x75_w067x50_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n44x75_w067x50_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n44x75_w067x50_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 32
+  },
+  "MA_NH_ME/ncei19_n44x75_w068x00_2021v1": {
+    "name": "MA_NH_ME/ncei19_n44x75_w068x00_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n44x75_w068x00_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n44x75_w068x00_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n44x75_w068x00_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 33
+  },
+  "MA_NH_ME/ncei19_n44x75_w068x50_2021v1": {
+    "name": "MA_NH_ME/ncei19_n44x75_w068x50_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n44x75_w068x50_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n44x75_w068x50_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n44x75_w068x50_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 34
+  },
+  "MA_NH_ME/ncei19_n44x75_w069x00_2021v1": {
+    "name": "MA_NH_ME/ncei19_n44x75_w069x00_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n44x75_w069x00_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n44x75_w069x00_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n44x75_w069x00_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 35
+  },
+  "MA_NH_ME/ncei19_n45x00_w067x25_2021v1": {
+    "name": "MA_NH_ME/ncei19_n45x00_w067x25_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n45x00_w067x25_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n45x00_w067x25_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n45x00_w067x25_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 36
+  },
+  "MA_NH_ME/ncei19_n45x00_w069x00_2021v1": {
+    "name": "MA_NH_ME/ncei19_n45x00_w069x00_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n45x00_w069x00_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n45x00_w069x00_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n45x00_w069x00_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 37
+  },
+  "MA_NH_ME/ncei19_n45x25_w067x25_2021v1": {
+    "name": "MA_NH_ME/ncei19_n45x25_w067x25_2021v1",
+    "subfolder": "MA_NH_ME",
+    "filename": "ncei19_n45x25_w067x25_2021v1.tif",
+    "path": "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/stofs_dems/MA_NH_ME/ncei19_n45x25_w067x25_2021v1.tif",
+    "url": "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/MA_NH_ME/ncei19_n45x25_w067x25_2021v1.tif",
+    "source": "cudem",
+    "available": true,
+    "priority": 38
+  }
+}

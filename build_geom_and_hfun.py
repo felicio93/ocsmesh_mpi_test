@@ -40,11 +40,27 @@ Shape-based refinements — fixed lat/lon boxes
     box2 (-80..-77, 31..35)  ->  add_patch (target 1000 m)
     feature line across box2 mid-latitude -> add_feature
 
+    box3 (-90..-86, 28..31)  ->  add_patch (target 800 m)   [NEW — Gulf Coast]
+    feature line across box3 mid-latitude -> add_feature     [NEW — Gulf Coast]
+
 Priority note
 -------------
 Rasters are passed to HfunCollector in ascending-priority order
 (GEBCO first = lowest, CUDEM tiles last = highest). HfunCollector reverses
 the list internally, so the last CUDEM tile wins on overlap.
+
+Execution mode translation
+--------------------------
+OCSMesh execution_mode accepts: 'serial', 'parallel', 'mpi'.
+This module additionally accepts 'mpi_no_pool' and 'mpi_hybrid' as aliases:
+
+    mpi_no_pool  ->  execution_mode='mpi', nprocs forced to 1 per rank
+                     (pure MPI, no internal Pool per rank)
+    mpi_hybrid   ->  execution_mode='mpi', nprocs = auto (cores/rank)
+                     (MPI ranks each spawn an internal Pool)
+
+The nprocs translation is handled by the caller (run_benchmark.py).
+build_hfun() receives the already-translated ocsmesh_mode string.
 """
 
 from __future__ import annotations
@@ -66,26 +82,27 @@ _logger = logging.getLogger("stofs_benchmark.build")
 # ---------------------------------------------------------------------------
 GLOBAL_HMIN = 1000.0      # 1 km — finest
 GLOBAL_HMAX = 7000.0      # 7 km — coarsest / background
-EXPANSION_RATE = 0.05     # for contour / channel / feature / patch
+EXPANSION_RATE = 0.15     # transition zone width (~8 km); was 0.05 (gave 50 km)
 
 # ---------------------------------------------------------------------------
 # Index-modulo scheme for per-source refinements (CUDEM tiles only)
 # ---------------------------------------------------------------------------
-# stride = 6: five refinement classes + one skip.
 MODULO_STRIDE = 6
 
 # ---------------------------------------------------------------------------
 # Fixed lat/lon boxes for shape-based refinements
 # (lon_min, lat_min, lon_max, lat_max) in EPSG:4326
+# All confirmed inside STOFS domain (-98..−53, 7.8..52.1)
 # ---------------------------------------------------------------------------
-BOX1 = (-85.0, 25.0, -82.0, 31.0)   # West Florida shelf -> region_constraint
-BOX2 = (-80.0, 31.0, -77.0, 35.0)   # SC/GA coast        -> patch + feature
+BOX1 = (-85.0, 25.0, -82.0, 31.0)   # West Florida shelf  -> region_constraint
+BOX2 = (-80.0, 31.0, -77.0, 35.0)   # SC/GA coast         -> patch + feature
+BOX3 = (-90.0, 28.0, -86.0, 31.0)   # Gulf Coast (new)    -> patch + feature
 
 
 # ---------------------------------------------------------------------------
 # Module-level helper for topo_func_constraint.
-# MUST be a module-level function (picklable). A lambda here would force the
-# parallel / MPI constraint path to fall back to serial with a warning.
+# MUST be module-level (picklable). Anas's branch uses keyword 'function='.
+# A lambda here raises ValueError due to the lambda guard in TopoFuncConstraint.
 # ---------------------------------------------------------------------------
 def _half_depth(depth: np.ndarray) -> np.ndarray:
     """Mesh size = |depth| / 2, used by topo_func_constraint."""
@@ -127,16 +144,14 @@ def load_ordered_rasters(manifest: Dict) -> Tuple[List[str], List[Dict]]:
 def _cudem_indices_by_class(metas: List[Dict]) -> Dict[int, List[int]]:
     """Group CUDEM raster-list indices by their modulo class.
 
-    GEBCO (source == 'gebco', typically index 0) is excluded from the
-    modulo scheme. For each CUDEM tile at raster-list index ``i``, its
-    class is ``(cudem_position) % MODULO_STRIDE`` where cudem_position is
-    the 0-based counter over CUDEM tiles only.
+    GEBCO (source == 'gebco') is excluded. For each CUDEM tile at
+    raster-list index ``i``, its class is
+    ``(cudem_position) % MODULO_STRIDE`` where cudem_position is the
+    0-based counter over CUDEM tiles only.
 
     Returns
     -------
     dict : {class_id: [raster_list_index, ...]}
-        class_id in 0..MODULO_STRIDE-1. class MODULO_STRIDE-1 (== 5) is
-        the "skip" class and is returned but not applied by build_hfun.
     """
     classes: Dict[int, List[int]] = {c: [] for c in range(MODULO_STRIDE)}
     cudem_pos = 0
@@ -154,35 +169,23 @@ def _cudem_indices_by_class(metas: List[Dict]) -> Dict[int, List[int]]:
 # ---------------------------------------------------------------------------
 
 def build_geom(raster_paths: List[str], domain_shape, nprocs: int):
-    """Build a GeomCollector clipped to the STOFS-3D-Atlantic domain.
-
-    Parameters
-    ----------
-    raster_paths : list of str
-        DEM paths (GEBCO first, CUDEM after).
-    domain_shape : Polygon or MultiPolygon
-        Domain boundary (EPSG:4326) used to clip DEMs.
-    nprocs : int
-        Processes for windowed geometry extraction.
-
-    Returns
-    -------
-    Geom (GeomCollector)
-    """
-    _logger.info(f"Building Geom from {len(raster_paths)} DEMs (nprocs={nprocs})")
+    """Build a GeomCollector clipped to the STOFS-3D-Atlantic domain."""
+    _logger.info(
+        f"Building Geom from {len(raster_paths)} DEMs (nprocs={nprocs})"
+    )
     geom = Geom(
         raster_paths,
         base_shape=domain_shape,
         base_shape_crs="EPSG:4326",
-        zmin=-11000.0,   # deepest ocean
-        zmax=10.0,       # slightly above MSL to capture the shoreline
+        zmin=-11000.0,
+        zmax=10.0,
         nprocs=nprocs,
     )
     return geom
 
 
 # ---------------------------------------------------------------------------
-# Hfun builder with index-modulo + global + box refinements
+# Hfun builder
 # ---------------------------------------------------------------------------
 
 def build_hfun(
@@ -196,6 +199,8 @@ def build_hfun(
     skip_constraints: bool = False,
     skip_box_refinements: bool = False,
     all_fast_refinements: bool = False,
+    config_f: bool = False,
+    config_g: bool = False,
 ):
     """Build an HfunCollector and apply all refinements.
 
@@ -204,51 +209,33 @@ def build_hfun(
     raster_paths : list of str
         DEM paths in ascending-priority order (GEBCO first).
     raster_metas : list of dict
-        Parallel metadata for each raster (used for the modulo scheme).
+        Parallel metadata for each raster.
     domain_shape : Polygon or MultiPolygon
-        Domain boundary; used as ``base_shape`` to clip DEMs.
+        Domain boundary.
     nprocs : int
-        Worker count for parallel / MPI modes.
-    execution_mode : {'serial', 'parallel', 'mpi'}
-    light_features : bool, default=False
-        If True, skip the global add_contour / add_channel refinements
-        (the O(tiles x segments) bottleneck).
-    skip_topofunc : bool, default=False
-        If True, skip add_topo_func_constraint. That constraint stores a
-        callable which forces OCSMesh's _apply_constraints to fall back to
-        SERIAL even in parallel/mpi modes (see collector.py). Skipping it
-        lets the constraint stage actually parallelize, and removes the
-        single most expensive serial step (~3h/tile).
-    skip_constraints : bool, default=False
-        If True, skip ALL topo/courant constraints (topo_bound, topo_func,
-        courant_num). Combined with skip_topofunc (which it supersedes),
-        this leaves only flow_limiter + const_value — the two fast per-tile
-        refinements. Use for the smoke test so serial_mp fits in 8h while
-        still exercising the Gmsh meshdata path end-to-end.
-    skip_box_refinements : bool, default=False
-        If True, skip the fixed-box refinements:
-          - add_region_constraint (BOX1: West FL shelf, rate=0.05)
-          - add_patch             (BOX2: SC/GA coast)
-          - add_feature           (line at BOX2 mid-latitude)
-        All three go through the expensive _apply_rate / KDTree distance
-        expansion path (~107 s/tile for region_constraint alone) and run
-        serially on rank 0 even in MPI mode. Measured on job 9600559:
-        these three cost ~1718 s serial (29 min) out of 3031 s total MPI
-        runtime. Skipping them isolates the pure Gmsh meshdata dispatch —
-        the only stage MPI actually parallelizes — for clean speedup
-        measurement. See HERCULES_NOTES #14.
-
-    all_fast_refinements : bool, default=False
-        If True, apply BOTH fast per-tile refinements (add_subtidal_flow_limiter
-        AND add_constant_value) to EVERY CUDEM tile, bypassing the index-modulo
-        scheme, and skip all slow refinements (constraints, contour/channel,
-        boxes) regardless of the other skip flags. This gives the smoke-test
-        "no constraint, 2 refinements per tile" configuration: every tile
-        exercises the two refinement stages you parallelized
-        (_apply_flow_limiters, _apply_const_val) with the maximum per-tile
-        work, and nothing routes through the slow _apply_rate/KDTree or
-        _apply_features paths. Both flow_limiter and constant_value are
-        pickle-safe, so parallel/mpi never fall back to serial.
+        Worker count. For mpi_no_pool this is 1; for mpi_hybrid this is
+        the per-rank core budget computed by run_benchmark.py.
+    execution_mode : str
+        One of 'serial', 'parallel', 'mpi'. The mpi_no_pool / mpi_hybrid
+        translation is done by run_benchmark.py before calling here.
+    light_features : bool
+        Skip global add_contour / add_channel.
+    skip_topofunc : bool
+        Skip add_topo_func_constraint only.
+    skip_constraints : bool
+        Skip ALL topo/courant constraints.
+    skip_box_refinements : bool
+        Skip add_region_constraint / add_patch / add_feature.
+    all_fast_refinements : bool
+        Apply flow_limiter + const_value to every CUDEM tile; force all
+        slow stages off.
+    config_f : bool
+        Config F recipe: flow_limiter + const_value + constraints +
+        contour/channel on all tiles. No box refinements. Maps to
+        Anas's Config E (all MPI-dispatched, no shape bottleneck).
+    config_g : bool
+        Config G recipe: Config F + patch + feature (BOX2 + BOX3).
+        Maps to Anas's Config F (full pipeline, all ops MPI-dispatched).
 
     Returns
     -------
@@ -268,22 +255,133 @@ def build_hfun(
         base_shape=domain_shape,
         base_shape_crs="EPSG:4326",
     )
-    # The execution_mode setter emits UserWarnings for expected conditions:
-    #   - "only 1 rank" when serial/parallel runs are launched under srun -n 1
-    #     (mode falls back to 'parallel' — this is correct, not an error)
-    #   - "no MPI environment detected" when running without srun at all
-    # Capture and log them instead of suppressing them silently, so the caller
-    # can see what mode was actually selected.
+
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", UserWarning)
         hfun.execution_mode = execution_mode
     for w in caught:
         _logger.warning(
-            "execution_mode setter [%s → %s]: %s",
+            "execution_mode setter [%s -> %s]: %s",
             execution_mode, hfun.execution_mode, str(w.message)
         )
 
-    # ── Per-source refinements: assign by index modulo ────────────────
+    # ── Config F: all MPI-dispatched ops, no shape bottleneck ─────────────
+    # Mirrors Anas's Config E. Every operation below is MPI-dispatched.
+    # add_patch / add_feature intentionally excluded to avoid coordinator-
+    # only serialization bottleneck — lets mpi_hybrid show true advantage.
+    if config_f:
+        _logger.info("Config F recipe: flow_limiter + const_value + "
+                     "constraints + contour/channel (all tiles, no boxes)")
+        all_cudem_idx = [
+            i for i, meta in enumerate(raster_metas)
+            if meta.get("source") != "gebco"
+        ]
+
+        hfun.add_subtidal_flow_limiter(
+            hmin=GLOBAL_HMIN, hmax=GLOBAL_HMAX,
+            lower_bound=-200.0, upper_bound=0.0,
+            source_index=all_cudem_idx,
+        )
+        hfun.add_constant_value(
+            value=1000.0, lower_bound=-5.0, upper_bound=0.0,
+            source_index=all_cudem_idx,
+        )
+        hfun.add_topo_bound_constraint(
+            value=1500.0, upper_bound=1.0, lower_bound=-2.0,
+            value_type="min", rate=EXPANSION_RATE,
+            source_index=all_cudem_idx,
+        )
+        hfun.add_topo_func_constraint(
+            func=_half_depth,
+            upper_bound=0.0, lower_bound=-3000.0,
+            value_type="min", rate=EXPANSION_RATE,
+            source_index=all_cudem_idx,
+        )
+        hfun.add_contour(
+            level=[0.0, -200.0],
+            expansion_rate=EXPANSION_RATE,
+            target_size=3500.0,
+        )
+        hfun.add_channel(
+            level=0.0, width=1000.0,
+            target_size=3500.0,
+            expansion_rate=EXPANSION_RATE,
+        )
+        _logger.info("Config F refinements applied.")
+        return hfun
+
+    # ── Config G: full pipeline, all ops MPI-dispatched ───────────────────
+    # Mirrors Anas's Config F. Config F ops + add_patch + add_feature
+    # on BOX2 and BOX3. Tests that shape-based ops work alongside all
+    # other MPI-dispatched ops without introducing bottlenecks.
+    if config_g:
+        _logger.info("Config G recipe: Config F + patch + feature "
+                     "(BOX2 SC/GA + BOX3 Gulf Coast)")
+        all_cudem_idx = [
+            i for i, meta in enumerate(raster_metas)
+            if meta.get("source") != "gebco"
+        ]
+
+        hfun.add_subtidal_flow_limiter(
+            hmin=GLOBAL_HMIN, hmax=GLOBAL_HMAX,
+            lower_bound=-200.0, upper_bound=0.0,
+            source_index=all_cudem_idx,
+        )
+        hfun.add_constant_value(
+            value=1000.0, lower_bound=-5.0, upper_bound=0.0,
+            source_index=all_cudem_idx,
+        )
+        hfun.add_topo_bound_constraint(
+            value=1500.0, upper_bound=1.0, lower_bound=-2.0,
+            value_type="min", rate=EXPANSION_RATE,
+            source_index=all_cudem_idx,
+        )
+        hfun.add_topo_func_constraint(
+            func=_half_depth,
+            upper_bound=0.0, lower_bound=-3000.0,
+            value_type="min", rate=EXPANSION_RATE,
+            source_index=all_cudem_idx,
+        )
+        hfun.add_contour(
+            level=[0.0, -200.0],
+            expansion_rate=EXPANSION_RATE,
+            target_size=3500.0,
+        )
+        hfun.add_channel(
+            level=0.0, width=1000.0,
+            target_size=3500.0,
+            expansion_rate=EXPANSION_RATE,
+        )
+        # BOX2: SC/GA coast patch + line feature
+        mid_lat2 = (BOX2[1] + BOX2[3]) / 2.0
+        hfun.add_patch(
+            shape=box(*BOX2),
+            expansion_rate=EXPANSION_RATE,
+            target_size=1000.0,
+        )
+        hfun.add_feature(
+            shape=LineString([(BOX2[0], mid_lat2), (BOX2[2], mid_lat2)]),
+            expansion_rate=EXPANSION_RATE,
+            target_size=1000.0,
+            crs=4326,
+        )
+        # BOX3: Gulf Coast patch + line feature
+        mid_lat3 = (BOX3[1] + BOX3[3]) / 2.0
+        hfun.add_patch(
+            shape=box(*BOX3),
+            expansion_rate=EXPANSION_RATE,
+            target_size=800.0,
+        )
+        hfun.add_feature(
+            shape=LineString([(BOX3[0], mid_lat3), (BOX3[2], mid_lat3)]),
+            expansion_rate=EXPANSION_RATE,
+            target_size=800.0,
+            crs=4326,
+        )
+        _logger.info("Config G refinements applied.")
+        return hfun
+
+    # ── Standard recipe (Configs A–E): index-modulo + flags ──────────────
     classes = _cudem_indices_by_class(raster_metas)
     flow_idx    = classes[0]
     const_idx   = classes[1]
@@ -292,11 +390,7 @@ def build_hfun(
     courant_idx = classes[4]
     skip_idx    = classes[5]
 
-    # ── all_fast_refinements: 2 fast refs on EVERY tile, nothing slow ──
-    # Overrides the modulo assignment and forces every slow stage off so
-    # only _apply_flow_limiters + _apply_const_val run (both pickle-safe,
-    # so parallel/mpi never fall back to serial). This is the smoke-test
-    # "no constraint, 2 refinements per tile" configuration.
+    # all_fast_refinements: flow+const on every tile, everything else off
     if all_fast_refinements:
         all_cudem_idx = [
             i for i, meta in enumerate(raster_metas)
@@ -306,12 +400,11 @@ def build_hfun(
         const_idx = list(all_cudem_idx)
         bound_idx = func_idx = courant_idx = []
         skip_idx  = []
-        # Force all slow stages off regardless of caller's other flags.
-        skip_constraints = True
+        skip_constraints     = True
         skip_box_refinements = True
-        light_features = True
+        light_features       = True
         _logger.info(
-            "  all_fast_refinements=True → flow_limiter + const_value on "
+            "  all_fast_refinements=True -> flow_limiter + const_value on "
             f"ALL {len(all_cudem_idx)} CUDEM tiles; constraints, "
             "contour/channel, and box refinements SKIPPED."
         )
@@ -326,18 +419,14 @@ def build_hfun(
 
     if flow_idx:
         hfun.add_subtidal_flow_limiter(
-            hmin=GLOBAL_HMIN,
-            hmax=GLOBAL_HMAX,
-            lower_bound=-200.0,
-            upper_bound=0.0,
+            hmin=GLOBAL_HMIN, hmax=GLOBAL_HMAX,
+            lower_bound=-200.0, upper_bound=0.0,
             source_index=flow_idx,
         )
 
     if const_idx:
         hfun.add_constant_value(
-            value=1000.0,
-            lower_bound=-5.0,
-            upper_bound=0.0,
+            value=1000.0, lower_bound=-5.0, upper_bound=0.0,
             source_index=const_idx,
         )
 
@@ -346,29 +435,29 @@ def build_hfun(
             _logger.info("  topo_bound_constraint SKIPPED (skip_constraints=True)")
         else:
             hfun.add_topo_bound_constraint(
-                value=1500.0,
-                upper_bound=1.0,
-                lower_bound=-2.0,
-                value_type="min",
-                rate=0.05,
+                value=1500.0, upper_bound=1.0, lower_bound=-2.0,
+                value_type="min", rate=EXPANSION_RATE,
                 source_index=bound_idx,
             )
 
     if func_idx and not (skip_topofunc or skip_constraints):
         hfun.add_topo_func_constraint(
-            func=_half_depth,     # module-level, picklable
-            upper_bound=0.0,
-            lower_bound=-3000.0,
-            value_type="min",
-            rate=0.05,
+            func=_half_depth,
+            upper_bound=0.0, lower_bound=-3000.0,
+            value_type="min", rate=EXPANSION_RATE,
             source_index=func_idx,
         )
     elif func_idx and (skip_topofunc or skip_constraints):
-        _logger.info("  topo_func_constraint SKIPPED (skip_topofunc/skip_constraints=True)")
+        _logger.info(
+            "  topo_func_constraint SKIPPED "
+            "(skip_topofunc/skip_constraints=True)"
+        )
 
     if courant_idx:
         if skip_constraints:
-            _logger.info("  courant_num_constraint SKIPPED (skip_constraints=True)")
+            _logger.info(
+                "  courant_num_constraint SKIPPED (skip_constraints=True)"
+            )
         else:
             hfun.add_courant_num_constraint(
                 upper_bound=0.9,
@@ -377,13 +466,11 @@ def build_hfun(
                 source_index=courant_idx,
             )
 
-    # ── Global refinements: contour + channel (all rasters) ───────────
-    # These are the O(tiles × contour-segments) bottleneck of the `exact`
-    # method. For fast MPI-path debugging, light_features=True skips them.
-    # The per-tile refinements above and the box refinements below still run,
-    # so the MPI per-tile meshdata() path is fully exercised.
+    # ── Global refinements: contour + channel ─────────────────────────────
     if light_features:
-        _logger.info("  Global: add_contour / add_channel SKIPPED (light_features=True)")
+        _logger.info(
+            "  Global: add_contour / add_channel SKIPPED (light_features=True)"
+        )
     else:
         _logger.info("  Global: add_contour (0 m + -200 m)")
         hfun.add_contour(
@@ -391,18 +478,14 @@ def build_hfun(
             expansion_rate=EXPANSION_RATE,
             target_size=3500.0,
         )
-
         _logger.info("  Global: add_channel")
         hfun.add_channel(
-            level=0.0,
-            width=1000.0,
+            level=0.0, width=1000.0,
             target_size=3500.0,
             expansion_rate=EXPANSION_RATE,
         )
 
-    # ── Shape-based refinements: fixed boxes ──────────────────────────
-    # These all go through expensive _apply_rate/KDTree paths. Skip them
-    # with skip_box_refinements=True to isolate the meshdata dispatch stage.
+    # ── Shape-based refinements: fixed boxes ──────────────────────────────
     if skip_box_refinements:
         _logger.info(
             "  Box refinements SKIPPED (skip_box_refinements=True): "
@@ -415,7 +498,7 @@ def build_hfun(
             shape=box(*BOX1),
             crs="EPSG:4326",
             value_type="max",
-            rate=0.05,
+            rate=EXPANSION_RATE,
         )
 
         _logger.info(f"  Box2 {BOX2}: add_patch (target 1000 m)")
@@ -424,14 +507,27 @@ def build_hfun(
             expansion_rate=EXPANSION_RATE,
             target_size=1000.0,
         )
-
-        # Line feature across box2 mid-latitude
-        mid_lat = (BOX2[1] + BOX2[3]) / 2.0
-        _logger.info(f"  Box2: add_feature (line at lat={mid_lat})")
+        mid_lat2 = (BOX2[1] + BOX2[3]) / 2.0
+        _logger.info(f"  Box2: add_feature (line at lat={mid_lat2})")
         hfun.add_feature(
-            shape=LineString([(BOX2[0], mid_lat), (BOX2[2], mid_lat)]),
+            shape=LineString([(BOX2[0], mid_lat2), (BOX2[2], mid_lat2)]),
             expansion_rate=EXPANSION_RATE,
             target_size=1000.0,
+            crs=4326,
+        )
+
+        _logger.info(f"  Box3 {BOX3}: add_patch (target 800 m)")
+        hfun.add_patch(
+            shape=box(*BOX3),
+            expansion_rate=EXPANSION_RATE,
+            target_size=800.0,
+        )
+        mid_lat3 = (BOX3[1] + BOX3[3]) / 2.0
+        _logger.info(f"  Box3: add_feature (line at lat={mid_lat3})")
+        hfun.add_feature(
+            shape=LineString([(BOX3[0], mid_lat3), (BOX3[2], mid_lat3)]),
+            expansion_rate=EXPANSION_RATE,
+            target_size=800.0,
             crs=4326,
         )
 
@@ -444,11 +540,7 @@ def build_hfun(
 # ---------------------------------------------------------------------------
 
 def _main() -> None:
-    """Standalone: load manifest and report the index-modulo assignment.
-
-    Does NOT call meshdata() — just verifies how tiles map to refinement
-    classes before launching a full run.
-    """
+    """Standalone: load manifest and report the index-modulo assignment."""
     import argparse
     import json
 
@@ -462,9 +554,11 @@ def _main() -> None:
 
     manifest = json.loads(args.manifest.read_text())
     raster_paths, raster_metas = load_ordered_rasters(manifest)
-    _logger.info(f"Loaded {len(raster_paths)} available rasters "
-                 f"({sum(1 for m in raster_metas if m.get('source')=='gebco')} GEBCO, "
-                 f"{sum(1 for m in raster_metas if m.get('source')=='cudem')} CUDEM).")
+    _logger.info(
+        f"Loaded {len(raster_paths)} available rasters "
+        f"({sum(1 for m in raster_metas if m.get('source')=='gebco')} GEBCO, "
+        f"{sum(1 for m in raster_metas if m.get('source')=='cudem')} CUDEM)."
+    )
 
     classes = _cudem_indices_by_class(raster_metas)
     names = {
@@ -477,8 +571,10 @@ def _main() -> None:
     }
     _logger.info("Index-modulo classes:")
     for cls, idxs in classes.items():
-        _logger.info(f"  class {cls} {names[cls]:<24} → {len(idxs)} tiles "
-                     f"{idxs[:8]}{'...' if len(idxs) > 8 else ''}")
+        _logger.info(
+            f"  class {cls} {names[cls]:<24} -> {len(idxs)} tiles "
+            f"{idxs[:8]}{'...' if len(idxs) > 8 else ''}"
+        )
 
 
 if __name__ == "__main__":

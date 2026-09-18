@@ -3,7 +3,7 @@
 #SBATCH --account=nos-surge
 #SBATCH --partition=hercules
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=20          # 1 manager + 79 MPI workers
+#SBATCH --ntasks-per-node=20          # 20 MPI ranks for CPU affinity test
 #SBATCH --cpus-per-task=3 
 #SBATCH --time=00:01:00
 #SBATCH --output=logs/%x_%j.out

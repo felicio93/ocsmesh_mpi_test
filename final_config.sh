@@ -2,27 +2,44 @@
 # =============================================================================
 # Shared configuration for the FINAL OCSMesh MPI benchmark
 # =============================================================================
-# Sourced by every slurm_final_*.sh and slurm_profile_*.sh script so ALL
-# modes run against the IDENTICAL workload (same manifest, recipe, hmin/hmax).
+# Sourced by every slurm_final_*.sh, slurm_smoke_*.sh, and slurm_anas_*.sh
+# script so ALL modes run against the IDENTICAL workload (same manifest,
+# recipe, hmin/hmax).
+#
+# Execution modes supported:
+#   serial_true   — true single-core baseline
+#   serial_mp     — serial mode, Pool steps use NPROCS workers
+#   parallel      — full multiprocessing Pool
+#   mpi           — MPI via MPIExecutor, NPROCS workers per rank
+#   mpi_no_pool   — MPI, 1 core per rank (pure MPI, no internal Pool)
+#   mpi_hybrid    — MPI, auto cores per rank (MPI + internal Pool)
 #
 # Two benchmark profiles:
 #
-#   Profile A — _apply_features cost (the serial, un-MPI-parallelized stage)
-#     Full recipe, 2-3 tiles, serial_mp only, windfall partition.
-#     Goal: quantify ~3h/tile constraint cost; show it dominates and is the
-#     next parallelization target.
+#   Profile A — _apply_features cost (serial, rank-0-only stages)
+#     Full recipe, 3 tiles, serial_mp only, windfall partition.
+#     Goal: quantify constraint cost; show it dominates and is next target.
 #     Script: slurm_profile_a_serial.sh
 #
-#   Profile B — _calculate_and_write_hfun_to_disk speedup (what MPI accelerates)
+#   Profile B — MPI speedup on meshdata dispatch
 #     LIGHT_FEATURES=1 + SKIP_CONSTRAINTS=1 (skip rank-0-only stages).
-#     ~18 CUDEM tiles, all modes (serial_mp / parallel / mpi 1-node / multinode).
-#     Goal: measure MPI speedup on the part it actually parallelizes (Gmsh).
-#     Scripts: slurm_final_serial_mp.sh / parallel.sh / mpi_1node.sh / multinode.sh
+#     ~18 CUDEM tiles, serial_mp / parallel / mpi / mpi_no_pool / mpi_hybrid.
+#     Goal: measure MPI speedup on the parallelized stage (Gmsh meshdata).
+#     Scripts: slurm_final_serial_mp.sh / parallel.sh / mpi_1node.sh /
+#              mpi_multinode.sh
+#
+#   Profile C — Anas's new operations (all MPI-dispatched)
+#     Config F (no boxes) and Config G (full pipeline with boxes).
+#     Tests serial_mp / mpi_no_pool / mpi_hybrid on real STOFS DEMs.
+#     Thin-rank variant (many 1-core ranks) and fat-rank variant
+#     (few multi-core ranks to show mpi_hybrid advantage).
+#     Scripts: slurm_anas_matrix.sh / slurm_smoke_config_F.sh /
+#              slurm_smoke_config_G.sh
 #
 # DO NOT hardcode manifest/recipe values in the individual job scripts.
 # =============================================================================
 
-# ── Paths ─────────────────────────────────────────────────────────────────
+# ── Paths ────────────────────────────────────────────────────────────────────
 PROJ="/work2/noaa/nos-surge/felicioc/OCSMesh_MPI"
 CONDA_BASE="/work2/noaa/nos-surge/felicioc/envs/miniconda3"
 CONDA_ENV="ocsmesh_mpi_test"
@@ -31,77 +48,97 @@ STOFS_SHAPEFILE="${PROJ}/inputs/stofs3.shp"
 DEM_OUT_DIR="${PROJ}/stofs_dems"
 
 # ── Profile A manifest: 3 CUDEM tiles (full recipe, serial_mp only) ──────────
-# ~3h/tile × 3 constraint tiles = ~9h; use windfall (24h) partition.
 PROFILE_A_N_CUDEM="${PROFILE_A_N_CUDEM:-3}"
 PROFILE_A_MANIFEST="${SCRIPT_DIR}/dem_manifest_profile_a.json"
 
 # ── Profile B manifest: 18 CUDEM tiles (skip-constraints, all modes) ─────────
-# At ~25 min/tile Gmsh, serial_mp takes ~7.5h (just fits 8h).
-# parallel / mpi finish in minutes — strong speedup demonstration.
 PROFILE_B_N_CUDEM="${PROFILE_B_N_CUDEM:-18}"
 PROFILE_B_MANIFEST="${SCRIPT_DIR}/dem_manifest_profile_b.json"
 
-# Default MANIFEST points at Profile B (used by slurm_final_*.sh scripts).
-# Override in individual scripts as needed.
-FULL_SMOKE_MANIFEST="${SCRIPT_DIR}/dem_manifest_smoke.json"
+# ── Smoke manifests ───────────────────────────────────────────────────────────
+FULL_SMOKE_MANIFEST="${SCRIPT_DIR}/dem_manifest_smoke.json"    # 38 CUDEM tiles
+SMOKE15_MANIFEST="${SCRIPT_DIR}/dem_manifest_smoke15.json"     # 14 CUDEM tiles
+SMOKE7_MANIFEST="${SCRIPT_DIR}/dem_manifest_smoke7.json"       #  6 CUDEM tiles
+
+# ── Profile C manifests: Anas's new operation configs ────────────────────────
+# Thin-rank variant: 1 rank per tile.
+#   38 CUDEM tiles + 1 GEBCO -> 39 ranks (1 manager + 38 workers).
+#   Use FULL_SMOKE_MANIFEST (38 tiles already on disk).
+PROFILE_C_THIN_MANIFEST="${FULL_SMOKE_MANIFEST}"
+PROFILE_C_THIN_RANKS=39        # 1 manager + 38 workers
+PROFILE_C_THIN_NTASKS=39
+PROFILE_C_THIN_CPUS_PER_TASK=1
+
+# Fat-rank variant: 8 worker ranks x 8 cores each = 64 cores.
+#   Needs 8 CUDEM tiles (+ 1 GEBCO = 9 total).
+#   Build from smoke manifest if not present.
+PROFILE_C_N_CUDEM_FAT="${PROFILE_C_N_CUDEM_FAT:-8}"
+PROFILE_C_FAT_MANIFEST="${SCRIPT_DIR}/dem_manifest_profile_c_fat.json"
+PROFILE_C_FAT_RANKS=9          # 1 manager + 8 workers
+PROFILE_C_FAT_NTASKS=9
+PROFILE_C_FAT_CPUS_PER_TASK=8
+
+# Default MANIFEST for general scripts
 if [ -f "${PROFILE_B_MANIFEST}" ]; then
     MANIFEST="${PROFILE_B_MANIFEST}"
 else
-    MANIFEST="${SCRIPT_DIR}/dem_manifest_smoke7.json"   # smoke fallback
+    MANIFEST="${SMOKE15_MANIFEST}"
 fi
 
-# ── Recipe knobs ────────────────────────────────────────────────────────────
-# Profile A: all flags OFF (full recipe).
-# Profile B: LIGHT_FEATURES=1 + SKIP_CONSTRAINTS=1 (isolate meshdata stage).
-# Individual scripts override these as needed.
+# ── Recipe knobs ─────────────────────────────────────────────────────────────
+# Individual scripts override these as needed. Defaults are Profile B values
+# (skip slow stages to isolate meshdata dispatch).
 LIGHT_FEATURES="${LIGHT_FEATURES:-0}"
 LIGHT_FLAG=""
-if [ "${LIGHT_FEATURES}" = "1" ]; then
-    LIGHT_FLAG="--light-features"
-fi
+[ "${LIGHT_FEATURES}" = "1" ] && LIGHT_FLAG="--light-features"
 
 SKIP_TOPOFUNC="${SKIP_TOPOFUNC:-0}"
 SKIP_TOPOFUNC_FLAG=""
-if [ "${SKIP_TOPOFUNC}" = "1" ]; then
-    SKIP_TOPOFUNC_FLAG="--skip-topofunc"
-fi
+[ "${SKIP_TOPOFUNC}" = "1" ] && SKIP_TOPOFUNC_FLAG="--skip-topofunc"
 
 SKIP_CONSTRAINTS="${SKIP_CONSTRAINTS:-0}"
 SKIP_CONSTRAINTS_FLAG=""
-if [ "${SKIP_CONSTRAINTS}" = "1" ]; then
-    SKIP_CONSTRAINTS_FLAG="--skip-constraints"
-fi
+[ "${SKIP_CONSTRAINTS}" = "1" ] && SKIP_CONSTRAINTS_FLAG="--skip-constraints"
 
-# SKIP_BOX_REFINEMENTS: skip region_constraint/patch/feature (expensive serial
-# path even after --skip-constraints: ~29 min/run via _apply_rate/KDTree on
-# rank 0, measured job 9600559). Default 1 for Profile B (isolate meshdata
-# dispatch); set 0 for Profile A (full realistic recipe). HERCULES_NOTES #14.
 SKIP_BOX_REFINEMENTS="${SKIP_BOX_REFINEMENTS:-1}"
 SKIP_BOX_REFINEMENTS_FLAG=""
-if [ "${SKIP_BOX_REFINEMENTS}" = "1" ]; then
+[ "${SKIP_BOX_REFINEMENTS}" = "1" ] && \
     SKIP_BOX_REFINEMENTS_FLAG="--skip-box-refinements"
-fi
 
-# FULL_PIPELINE=1 runs the complete end-to-end workflow (geom + hfun +
-# MeshDriver final mesh) and records per-stage wall times. For the FINAL
-# benchmark this should be 1 so we profile every stage and generate the
-# actual mesh (mesh_<mode>.2dm) in addition to the hfun size field.
 FULL_PIPELINE="${FULL_PIPELINE:-1}"
 FULL_PIPELINE_FLAG=""
-if [ "${FULL_PIPELINE}" = "1" ]; then
-    FULL_PIPELINE_FLAG="--full-pipeline"
-fi
+[ "${FULL_PIPELINE}" = "1" ] && FULL_PIPELINE_FLAG="--full-pipeline"
 
-ALL_FLAGS="${LIGHT_FLAG} ${SKIP_TOPOFUNC_FLAG} ${SKIP_CONSTRAINTS_FLAG} ${SKIP_BOX_REFINEMENTS_FLAG} ${FULL_PIPELINE_FLAG}"
+# Config F / G flags (new — Anas's fully MPI-dispatched configs)
+CONFIG_F="${CONFIG_F:-0}"
+CONFIG_F_FLAG=""
+[ "${CONFIG_F}" = "1" ] && CONFIG_F_FLAG="--config-f"
 
-# Global mesh size bounds (metres). Identical across all modes.
+CONFIG_G="${CONFIG_G:-0}"
+CONFIG_G_FLAG=""
+[ "${CONFIG_G}" = "1" ] && CONFIG_G_FLAG="--config-g"
+
+ALL_FLAGS="${LIGHT_FLAG} ${SKIP_TOPOFUNC_FLAG} ${SKIP_CONSTRAINTS_FLAG} \
+${SKIP_BOX_REFINEMENTS_FLAG} ${FULL_PIPELINE_FLAG} \
+${CONFIG_F_FLAG} ${CONFIG_G_FLAG}"
+
+# ── Global mesh size bounds ───────────────────────────────────────────────────
 HMIN="${HMIN:-1000.0}"
 HMAX="${HMAX:-7000.0}"
 
-# Worker count. 79 = 80 cores - 1 MPI manager rank.
+# ── Worker counts ─────────────────────────────────────────────────────────────
+# Standard single-node: 80 cores, 1 manager + 79 workers
 NPROCS="${NPROCS:-79}"
 
-# ── Environment loader ───────────────────────────────────────────────────────
+# Thin-rank MPI: 1 core per rank, 1 rank per tile
+# (use PROFILE_C_THIN_NTASKS for --ntasks)
+NPROCS_THIN=1
+
+# Fat-rank MPI hybrid: 8 workers x 8 cores each
+# (use PROFILE_C_FAT_NTASKS / PROFILE_C_FAT_CPUS_PER_TASK for SLURM)
+NPROCS_FAT="${PROFILE_C_FAT_CPUS_PER_TASK}"
+
+# ── Environment loader ────────────────────────────────────────────────────────
 load_ocsmesh_env() {
     module purge
     module load intel-oneapi-compilers/2022.2.1
@@ -116,18 +153,39 @@ load_ocsmesh_env() {
     export OPENBLAS_NUM_THREADS=1
 }
 
+# ── Fat-manifest builder ──────────────────────────────────────────────────────
+# Builds the 8-tile fat-rank manifest if not already present.
+ensure_fat_manifest() {
+    if [ ! -f "${PROFILE_C_FAT_MANIFEST}" ]; then
+        if [ ! -f "${FULL_SMOKE_MANIFEST}" ]; then
+            echo "ERROR: ${FULL_SMOKE_MANIFEST} not found." \
+                 "Run download_dems.py first."
+            exit 1
+        fi
+        echo "--- Building fat-rank manifest " \
+             "(${PROFILE_C_N_CUDEM_FAT} CUDEM tiles) ---"
+        srun --mpi=pmi2 -n 1 python "${SCRIPT_DIR}/trim_manifest.py" \
+            --in  "${FULL_SMOKE_MANIFEST}" \
+            --out "${PROFILE_C_FAT_MANIFEST}" \
+            --n-cudem "${PROFILE_C_N_CUDEM_FAT}"
+    fi
+}
+
+# ── Config printer ────────────────────────────────────────────────────────────
 print_final_config() {
     echo "================================================================="
     echo " OCSMesh benchmark config"
-    echo "   Job ID          : ${SLURM_JOB_ID:-<none>}"
-    echo "   Nodes           : ${SLURM_NODELIST:-<none>}"
-    echo "   Manifest        : ${MANIFEST}"
-    echo "   LIGHT_FEATURES  : ${LIGHT_FEATURES}"
-    echo "   SKIP_TOPOFUNC   : ${SKIP_TOPOFUNC}"
-    echo "   SKIP_CONSTRAINTS: ${SKIP_CONSTRAINTS}"
-    echo "   SKIP_BOX_REFS  : ${SKIP_BOX_REFINEMENTS}"
-    echo "   FULL_PIPELINE   : ${FULL_PIPELINE}"
-    echo "   hmin / hmax     : ${HMIN} / ${HMAX}"
-    echo "   NPROCS          : ${NPROCS}"
+    echo "   Job ID           : ${SLURM_JOB_ID:-<none>}"
+    echo "   Nodes            : ${SLURM_NODELIST:-<none>}"
+    echo "   Manifest         : ${MANIFEST}"
+    echo "   LIGHT_FEATURES   : ${LIGHT_FEATURES}"
+    echo "   SKIP_TOPOFUNC    : ${SKIP_TOPOFUNC}"
+    echo "   SKIP_CONSTRAINTS : ${SKIP_CONSTRAINTS}"
+    echo "   SKIP_BOX_REFS    : ${SKIP_BOX_REFINEMENTS}"
+    echo "   CONFIG_F         : ${CONFIG_F}"
+    echo "   CONFIG_G         : ${CONFIG_G}"
+    echo "   FULL_PIPELINE    : ${FULL_PIPELINE}"
+    echo "   hmin / hmax      : ${HMIN} / ${HMAX}"
+    echo "   NPROCS           : ${NPROCS}"
     echo "================================================================="
 }
