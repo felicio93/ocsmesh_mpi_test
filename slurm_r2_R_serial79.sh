@@ -19,6 +19,7 @@ source "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/final_config
 MANIFEST="${PROFILE_C_FAT_MANIFEST}"
 OUT="${PROJ}/results/config_R/serial_mp_79"
 mkdir -p "${OUT}/tmp" logs
+export TMPDIR="${OUT}/tmp"
 load_ocsmesh_env
 
 AVAIL=$(df /work2 | awk 'NR==2{print $4}')
@@ -29,12 +30,9 @@ fi
 
 echo "=== Config R serial_mp nprocs=79 (fat baseline) ==="
 echo "Job: ${SLURM_JOB_ID}  Node: ${SLURM_NODELIST}  Date: $(date)"
+echo "Available /work2: $(df -h /work2 | awk 'NR==2{print $4}')"
 
-export TMPDIR="${OUT}/tmp"
-srun --mpi=pmi2 \
-     --ntasks=1 \
-     --export=ALL,TMPDIR="${OUT}/tmp" \
-     python "${SCRIPT_DIR}/run_benchmark.py" \
+srun --mpi=pmi2 -n 1 python "${SCRIPT_DIR}/run_benchmark.py" \
     --manifest  "${MANIFEST}" \
     --shapefile "${STOFS_SHAPEFILE}" \
     --out-dir   "${OUT}" \

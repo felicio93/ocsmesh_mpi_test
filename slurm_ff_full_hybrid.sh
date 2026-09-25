@@ -1,23 +1,23 @@
 #!/bin/bash
-# slurm_r2_R5.sh — add_channel only
-#SBATCH --job-name=r2_R5
+# slurm_ff_full_hybrid.sh — full Config F-fat, mpi_hybrid
+#SBATCH --job-name=ff_full_hybrid
 #SBATCH --account=nos-surge
 #SBATCH --partition=hercules
-#SBATCH --nodes=6
-#SBATCH --ntasks=452
-#SBATCH --cpus-per-task=1
+#SBATCH --nodes=1
+#SBATCH --ntasks=9
+#SBATCH --cpus-per-task=8
 #SBATCH --exclusive
 #SBATCH --time=08:00:00
-#SBATCH --output=logs/r2_R5_%j.out
-#SBATCH --error=logs/r2_R5_%j.err
+#SBATCH --output=logs/ff_full_hybrid_%j.out
+#SBATCH --error=logs/ff_full_hybrid_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=felicio.cassalho@noaa.gov
 
 set -euo pipefail
 source "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/final_config.sh"
 
-MANIFEST="${SCRIPT_DIR}/dem_manifest_full_split.json"
-OUT="${PROJ}/results/config_R/isolation/R5_channel"
+MANIFEST="${SCRIPT_DIR}/dem_manifest_config_f.json"
+OUT="${PROJ}/results/config_ffat/full/mpi_hybrid"
 mkdir -p "${OUT}/tmp" logs
 export TMPDIR="${OUT}/tmp"
 export OCSMESH_SHARED_TMPDIR="${OUT}/tmp"
@@ -25,27 +25,21 @@ load_ocsmesh_env
 
 AVAIL=$(df /work2 | awk 'NR==2{print $4}')
 if [ "${AVAIL}" -lt 10485760 ]; then
-    echo "ERROR: less than 10 GB on /work2. Aborting."
-    exit 1
+    echo "ERROR: less than 10 GB on /work2. Aborting."; exit 1
 fi
 
-echo "=== Config R5: add_channel only (452 ranks, 6 nodes) ==="
-echo "Job: ${SLURM_JOB_ID}  Nodes: ${SLURM_NODELIST}  Date: $(date)"
+echo "=== Config F-fat full mpi_hybrid (9 ranks x 8 cores, 44 tiles) ==="
+echo "Job: ${SLURM_JOB_ID}  Node: ${SLURM_NODELIST}  Date: $(date)"
 
-export TMPDIR="${OUT}/tmp"
-export OCSMESH_SHARED_TMPDIR="${OUT}/tmp"
 srun --mpi=pmi2 \
-     --ntasks=452 \
-     --cpus-per-task=1 \
+     --ntasks=9 --cpus-per-task=8 \
      --export=ALL,TMPDIR="${OUT}/tmp",OCSMESH_SHARED_TMPDIR="${OUT}/tmp" \
      python "${SCRIPT_DIR}/run_benchmark.py" \
         --manifest  "${MANIFEST}" \
         --shapefile "${STOFS_SHAPEFILE}" \
         --out-dir   "${OUT}" \
-        --nprocs    1 \
-        --hmin      "${HMIN}" \
-        --hmax      "${HMAX}" \
-        --modes     mpi_no_pool \
-        --config-r5
+        --nprocs    8 \
+        --hmin      "${HMIN}" --hmax "${HMAX}" \
+        --modes     mpi_hybrid --config-ffat
 
 echo "=== DONE $(date) ==="

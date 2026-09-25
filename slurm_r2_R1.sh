@@ -19,6 +19,8 @@ source "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/final_config
 MANIFEST="${SCRIPT_DIR}/dem_manifest_full_split.json"
 OUT="${PROJ}/results/config_R/isolation/R1_constant_value"
 mkdir -p "${OUT}/tmp" logs
+export TMPDIR="${OUT}/tmp"
+export OCSMESH_SHARED_TMPDIR="${OUT}/tmp"
 load_ocsmesh_env
 
 AVAIL=$(df /work2 | awk 'NR==2{print $4}')
@@ -31,10 +33,11 @@ echo "=== Config R1: add_constant_value only (452 ranks, 6 nodes) ==="
 echo "Job: ${SLURM_JOB_ID}  Nodes: ${SLURM_NODELIST}  Date: $(date)"
 
 export TMPDIR="${OUT}/tmp"
+export OCSMESH_SHARED_TMPDIR="${OUT}/tmp"
 srun --mpi=pmi2 \
      --ntasks=452 \
      --cpus-per-task=1 \
-     --export=ALL,TMPDIR="${OUT}/tmp" \
+     --export=ALL,TMPDIR="${OUT}/tmp",OCSMESH_SHARED_TMPDIR="${OUT}/tmp" \
      python "${SCRIPT_DIR}/run_benchmark.py" \
         --manifest  "${MANIFEST}" \
         --shapefile "${STOFS_SHAPEFILE}" \

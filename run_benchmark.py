@@ -22,18 +22,43 @@ This script is the heart of the Hercules benchmark. It:
 
 Recipe configs (mutually exclusive)
 -------------------------------------
-  --config-f    Config F: flow+const+constraints+contour/channel, no boxes.
-  --config-g    Config G: Config F + patch + feature (BOX2+BOX3).
-  --config-r    Config R: full production recipe (5 ops, all 451 tiles).
-  --config-r0   Isolation: no refinements (flat background).
-  --config-r1   Isolation: add_constant_value only.
-  --config-r2   Isolation: add_topo_bound_constraint only.
-  --config-r3   Isolation: add_contour only.
-  --config-r4   Isolation: add_subtidal_flow_limiter only.
-  --config-r5   Isolation: add_channel only.
+  --config-f      Config F-anas: Anas PR benchmark (flow+const+constraints+
+                  contour/channel, CUDEM tiles only, no boxes).
+  --config-g      Config G: Config F-anas + patch + feature (BOX2+BOX3).
+  --config-r      Config R: full production recipe (5 ops, 451 tiles).
+  --config-r0     Isolation: no refinements.
+  --config-r1     Isolation: add_constant_value only.
+  --config-r2     Isolation: add_topo_bound_constraint only.
+  --config-r3     Isolation: add_contour only.
+  --config-r4     Isolation: add_subtidal_flow_limiter only.
+  --config-r5     Isolation: add_channel only.
+  --config-ffat   Config F-fat: 2x finer production recipe
+                  (MA/NH/ME, 44 tiles, all 5 ops).
+  --config-f0     Isolation: no refinements (F-fat domain).
+  --config-f1     Isolation: add_constant_value only (F-fat).
+  --config-f2     Isolation: add_topo_bound_constraint only (F-fat).
+  --config-f3     Isolation: add_contour only (F-fat).
+  --config-f4     Isolation: add_subtidal_flow_limiter only (F-fat).
+  --config-f5     Isolation: add_channel only (F-fat).
 """
 
 from __future__ import annotations
+
+# ---------------------------------------------------------------------------
+# TMPDIR override — must happen before ANY import of ocsmesh or rasterio.
+# SLURM's node prolog sets TMPDIR=/local/scratch/$USER/$JOBID (node-local,
+# not visible to other nodes) AFTER our bash export runs. By re-reading
+# OCSMESH_SHARED_TMPDIR (set in the SLURM script) here in Python, we ensure
+# all temp files go to the shared Lustre filesystem regardless of what the
+# prolog did to TMPDIR.
+# ---------------------------------------------------------------------------
+import os as _os
+import tempfile as _tempfile
+_shared_tmpdir = _os.environ.get('OCSMESH_SHARED_TMPDIR', '')
+if _shared_tmpdir:
+    _os.makedirs(_shared_tmpdir, exist_ok=True)
+    _os.environ['TMPDIR'] = _shared_tmpdir
+    _tempfile.tempdir = _shared_tmpdir
 
 import argparse
 import cProfile
@@ -151,7 +176,7 @@ _MODE_CONFIG = {
     "mpi_no_pool": ("mpi",      1),
     "mpi_hybrid":  ("mpi",      "auto"),
 }
-_MPI_MODES       = {"mpi", "mpi_no_pool", "mpi_hybrid"}
+_MPI_MODES        = {"mpi", "mpi_no_pool", "mpi_hybrid"}
 _RANK0_ONLY_MODES = {"serial_true", "serial_mp", "parallel"}
 
 # All mutually exclusive config flags
@@ -159,6 +184,8 @@ _CONFIG_FLAGS = [
     "config_f", "config_g",
     "config_r", "config_r0", "config_r1", "config_r2",
     "config_r3", "config_r4", "config_r5",
+    "config_ffat", "config_f0", "config_f1", "config_f2",
+    "config_f3", "config_f4", "config_f5",
 ]
 
 
@@ -200,7 +227,11 @@ def _build_hfun(manifest, domain_shape, nprocs, execution_mode,
                 config_r=False, config_r0=False,
                 config_r1=False, config_r2=False,
                 config_r3=False, config_r4=False,
-                config_r5=False) -> Hfun:
+                config_r5=False,
+                config_ffat=False,
+                config_f0=False, config_f1=False,
+                config_f2=False, config_f3=False,
+                config_f4=False, config_f5=False) -> Hfun:
     raster_paths, raster_metas = recipe.load_ordered_rasters(manifest)
     if not raster_paths:
         raise RuntimeError("No DEM files found.")
@@ -217,6 +248,10 @@ def _build_hfun(manifest, domain_shape, nprocs, execution_mode,
         config_r1=config_r1, config_r2=config_r2,
         config_r3=config_r3, config_r4=config_r4,
         config_r5=config_r5,
+        config_ffat=config_ffat,
+        config_f0=config_f0, config_f1=config_f1,
+        config_f2=config_f2, config_f3=config_f3,
+        config_f4=config_f4, config_f5=config_f5,
     )
 
 
@@ -273,13 +308,12 @@ def _run_mode(manifest, domain_shape, nprocs, mode, out_dir, comm,
               config_r1=False, config_r2=False,
               config_r3=False, config_r4=False,
               config_r5=False,
+              config_ffat=False,
+              config_f0=False, config_f1=False,
+              config_f2=False, config_f3=False,
+              config_f4=False, config_f5=False,
               full_pipeline=False) -> tuple:
-    """Run meshdata() for one benchmark mode.
-
-    Returns (result_dict, meshdata_values).
-    result_dict is meaningful on rank 0 only.
-    meshdata_values is np.ndarray on rank 0, None on workers.
-    """
+    """Run meshdata() for one benchmark mode."""
     log = _logger
     result: Dict = {"mode": mode, "status": "pending"}
     meshdata_values = None
@@ -312,7 +346,6 @@ def _run_mode(manifest, domain_shape, nprocs, mode, out_dir, comm,
         )
         log.info(f"{'='*60}")
 
-        # Stage 1: optional geom
         geom = None
         if full_pipeline:
             t_geom = time.perf_counter()
@@ -320,7 +353,6 @@ def _run_mode(manifest, domain_shape, nprocs, mode, out_dir, comm,
             stage_times["geom_build_s"] = round(
                 time.perf_counter() - t_geom, 3)
 
-        # Stage 2: build hfun
         t_hfun_build = time.perf_counter()
         hfun = _build_hfun(
             manifest, domain_shape, effective_nprocs, ocsmesh_mode,
@@ -334,11 +366,14 @@ def _run_mode(manifest, domain_shape, nprocs, mode, out_dir, comm,
             config_r1=config_r1, config_r2=config_r2,
             config_r3=config_r3, config_r4=config_r4,
             config_r5=config_r5,
+            config_ffat=config_ffat,
+            config_f0=config_f0, config_f1=config_f1,
+            config_f2=config_f2, config_f3=config_f3,
+            config_f4=config_f4, config_f5=config_f5,
         )
         stage_times["hfun_build_s"] = round(
             time.perf_counter() - t_hfun_build, 3)
 
-        # Stage 3: meshdata (MPI-parallelized)
         t_meshdata = time.perf_counter()
         prof.enable()
         meshdata = hfun.meshdata()
@@ -353,13 +388,11 @@ def _run_mode(manifest, domain_shape, nprocs, mode, out_dir, comm,
                 comm.allreduce(cpu_s)
             return {}, None
 
-        # Stats
         n_nodes = len(meshdata.coords)
         n_tria  = len(meshdata.tria) if meshdata.tria is not None else 0
         vals    = meshdata.values
         meshdata_values = np.array(vals, copy=True)
 
-        # Stage 4: optional MeshDriver
         final_mesh = None
         if full_pipeline and geom is not None:
             t_driver = time.perf_counter()
@@ -372,7 +405,6 @@ def _run_mode(manifest, domain_shape, nprocs, mode, out_dir, comm,
             stage_times["meshdriver_run_s"] = round(
                 time.perf_counter() - t_driver, 3)
 
-        # CPU utilization
         wall_time = time.perf_counter() - t0_wall
         cpu_s     = _cpu_seconds() - t0_cpu
         if _MPI_ACTIVE and mode in _MPI_MODES and comm is not None:
@@ -407,11 +439,9 @@ def _run_mode(manifest, domain_shape, nprocs, mode, out_dir, comm,
         )
         log.info(f"[{mode}] stage times (s): {stage_times}")
 
-        # Save cProfile
         prof_path = out_dir / f"profile_{mode}.prof"
         prof.dump_stats(str(prof_path))
 
-        # Save hfun .2dm
         hfun_path = out_dir / f"hfun_{mode}.2dm"
         try:
             Mesh(meshdata).write(
@@ -420,7 +450,6 @@ def _run_mode(manifest, domain_shape, nprocs, mode, out_dir, comm,
         except Exception as e:
             log.warning(f"Could not save hfun .2dm: {e}")
 
-        # Save final mesh .2dm
         if final_mesh is not None:
             final_path = out_dir / f"mesh_{mode}.2dm"
             try:
@@ -430,7 +459,6 @@ def _run_mode(manifest, domain_shape, nprocs, mode, out_dir, comm,
             except Exception as e:
                 log.warning(f"Could not save mesh .2dm: {e}")
 
-        # cProfile top-20
         sio = io.StringIO()
         ps  = pstats.Stats(prof, stream=sio)
         ps.sort_stats("cumulative")
@@ -493,50 +521,53 @@ def main() -> None:
     parser.add_argument("--skip-box-refinements", action="store_true")
     parser.add_argument("--all-fast-refinements", action="store_true")
 
-    # ── Config F / G ──────────────────────────────────────────────────────
+    # ── Config F-anas / G (Anas PR benchmarks) ────────────────────────────
     parser.add_argument(
         "--config-f", action="store_true",
-        help="Config F: flow+const+constraints+contour/channel, no boxes.",
+        help="Config F-anas: Anas PR benchmark ops, CUDEM tiles only.",
     )
     parser.add_argument(
         "--config-g", action="store_true",
-        help="Config G: Config F + patch + feature (BOX2+BOX3).",
+        help="Config G: Config F-anas + patch + feature.",
     )
 
-    # ── Config R and isolation runs ───────────────────────────────────────
+    # ── Config R and isolation runs (full STOFS domain, 451 tiles) ────────
+    parser.add_argument("--config-r",  action="store_true",
+        help="Config R: full production recipe, 451 tiles.")
+    parser.add_argument("--config-r0", action="store_true",
+        help="Config R0: no refinements.")
+    parser.add_argument("--config-r1", action="store_true",
+        help="Config R1: add_constant_value only.")
+    parser.add_argument("--config-r2", action="store_true",
+        help="Config R2: add_topo_bound_constraint only.")
+    parser.add_argument("--config-r3", action="store_true",
+        help="Config R3: add_contour only.")
+    parser.add_argument("--config-r4", action="store_true",
+        help="Config R4: add_subtidal_flow_limiter only.")
+    parser.add_argument("--config-r5", action="store_true",
+        help="Config R5: add_channel only.")
+
+    # ── Config F-fat and isolation runs (MA/NH/ME, 44 tiles, 2x finer) ───
     parser.add_argument(
-        "--config-r", action="store_true",
+        "--config-ffat", action="store_true",
         help=(
-            "Config R: full production recipe. "
-            "constant_value(7km,<-2000m) + topo_bound(4km,-2000..-200m) "
-            "+ contour(0m,2km,rate=0.01) + flow_limiter(1km) "
-            "+ channel(2km,1km,rate=0.01). All 451 tiles."
+            "Config F-fat: 2x finer production recipe on MA/NH/ME region. "
+            "shelf=2km, contour=1km, flow_hmin=500m, channel=500m. "
+            "Use with dem_manifest_config_f.json (44 tiles, 45 ranks)."
         ),
     )
-    parser.add_argument(
-        "--config-r0", action="store_true",
-        help="Config R0: no refinements (flat background).",
-    )
-    parser.add_argument(
-        "--config-r1", action="store_true",
-        help="Config R1: add_constant_value only (open ocean 7km).",
-    )
-    parser.add_argument(
-        "--config-r2", action="store_true",
-        help="Config R2: add_topo_bound_constraint only (shelf 4km).",
-    )
-    parser.add_argument(
-        "--config-r3", action="store_true",
-        help="Config R3: add_contour only (shoreline 2km, rate=0.01).",
-    )
-    parser.add_argument(
-        "--config-r4", action="store_true",
-        help="Config R4: add_subtidal_flow_limiter only (1km).",
-    )
-    parser.add_argument(
-        "--config-r5", action="store_true",
-        help="Config R5: add_channel only (2km wide, 1km, rate=0.01).",
-    )
+    parser.add_argument("--config-f0", action="store_true",
+        help="Config F0: no refinements (F-fat domain).")
+    parser.add_argument("--config-f1", action="store_true",
+        help="Config F1: add_constant_value only (F-fat).")
+    parser.add_argument("--config-f2", action="store_true",
+        help="Config F2: add_topo_bound_constraint only (F-fat, value=2km).")
+    parser.add_argument("--config-f3", action="store_true",
+        help="Config F3: add_contour only (F-fat, size=1km).")
+    parser.add_argument("--config-f4", action="store_true",
+        help="Config F4: add_subtidal_flow_limiter only (F-fat, hmin=500m).")
+    parser.add_argument("--config-f5", action="store_true",
+        help="Config F5: add_channel only (F-fat, size=500m).")
 
     parser.add_argument("--full-pipeline", action="store_true")
     parser.add_argument("--hmin", type=float, default=GLOBAL_HMIN)
@@ -580,7 +611,6 @@ def main() -> None:
                 f"mpi_hybrid auto cores/rank : {_plan_hybrid_cores(comm)}"
             )
 
-    # Load inputs
     if _IS_MANAGER:
         try:
             manifest = _load_manifest(args.manifest)
@@ -598,7 +628,6 @@ def main() -> None:
         manifest     = comm.bcast(manifest,     root=0)
         domain_shape = comm.bcast(domain_shape, root=0)
 
-    # Run each mode
     all_results:   List[Dict]            = []
     stored_values: Dict[str, np.ndarray] = {}
 
@@ -629,6 +658,13 @@ def main() -> None:
             config_r3=args.config_r3,
             config_r4=args.config_r4,
             config_r5=args.config_r5,
+            config_ffat=args.config_ffat,
+            config_f0=args.config_f0,
+            config_f1=args.config_f1,
+            config_f2=args.config_f2,
+            config_f3=args.config_f3,
+            config_f4=args.config_f4,
+            config_f5=args.config_f5,
             full_pipeline=args.full_pipeline,
         )
         if result:
@@ -636,7 +672,6 @@ def main() -> None:
         if vals is not None:
             stored_values[mode] = vals
 
-    # Correctness check
     correctness_checks = []
     if _IS_MANAGER and len(stored_values) > 1:
         baseline_mode = next(
@@ -657,7 +692,6 @@ def main() -> None:
                     f"{c['reason']}"
                 )
 
-    # Write summary JSON
     if _IS_MANAGER and all_results:
         baseline_time = next(
             (r["wall_time_s"] for r in all_results
@@ -694,7 +728,6 @@ def main() -> None:
         out_json.write_text(json.dumps(summary, indent=2))
         _logger.info(f"\nResults written to {out_json}")
 
-        # Summary table
         _logger.info("\n" + "=" * 90)
         _logger.info("  BENCHMARK SUMMARY")
         _logger.info("=" * 90)

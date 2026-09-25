@@ -23,36 +23,37 @@ Config F + shape-based refinements:
     add_patch  (BOX2: SC/GA coast + BOX3: Gulf Coast)
     add_feature (line features at BOX2 + BOX3)
 
-Config R (real-world production recipe)
------------------------------------------
-Realistic storm surge mesh size function recipe:
+Config R (real-world production recipe — full STOFS domain)
+------------------------------------------------------------
+Realistic storm surge mesh size function recipe on 451 tiles:
     add_constant_value         — all tiles, value=7km, upper_bound=-2000m
     add_topo_bound_constraint  — all tiles, value=4km, -2000..-200m, min
     add_contour                — all tiles, level=0m, rate=0.01, size=2km
     add_subtidal_flow_limiter  — all tiles, hmin=1km, hmax=7km
     add_channel                — all tiles, width=2km, size=1km, rate=0.01
 
-Config R0-R5 (isolation runs)
-------------------------------
-Each applies only one of the Config R operations to isolate its effect:
-    R0 — no refinements (flat background)
-    R1 — add_constant_value only
-    R2 — add_topo_bound_constraint only
-    R3 — add_contour only
-    R4 — add_subtidal_flow_limiter only
-    R5 — add_channel only
+Config R0-R5 (Config R isolation runs)
+----------------------------------------
+Each applies only one Config R operation in isolation.
+
+Config F-fat (finer refinements, MA/NH/ME region, 44 tiles)
+-------------------------------------------------------------
+Same recipe structure as Config R but with 2x finer refinement targets
+on the MA/NH/ME smoke domain (38 CUDEM + 6 split GEBCO = 44 tiles):
+    add_constant_value         — all tiles, value=7km, upper_bound=-2000m
+    add_topo_bound_constraint  — all tiles, value=2km, -2000..-200m, min
+    add_contour                — all tiles, level=0m, rate=0.01, size=1km
+    add_subtidal_flow_limiter  — all tiles, hmin=500m, hmax=7km
+    add_channel                — all tiles, width=2km, size=500m, rate=0.01
+    hmin=1000m, hmax=7000m (global bounds unchanged)
+
+Config F0-F5 (Config F-fat isolation runs)
+-------------------------------------------
+Each applies only one Config F-fat operation in isolation.
 
 Standard recipe (Configs A-E)
 ------------------------------
-Index-modulo scheme assigning different refinements to different
-CUDEM tiles by position. Used for the original cost-ladder benchmarks.
-
-Execution mode translation
---------------------------
-OCSMesh accepts: 'serial', 'parallel', 'mpi'.
-mpi_no_pool -> execution_mode='mpi', nprocs=1 per rank
-mpi_hybrid  -> execution_mode='mpi', nprocs=auto per rank
-Translation is done by run_benchmark.py before calling build_hfun().
+Index-modulo scheme assigning different refinements to CUDEM tiles.
 """
 
 from __future__ import annotations
@@ -74,21 +75,42 @@ _logger = logging.getLogger("stofs_benchmark.build")
 # ---------------------------------------------------------------------------
 GLOBAL_HMIN = 1000.0
 GLOBAL_HMAX = 7000.0
-EXPANSION_RATE = 0.15     # standard A-E configs transition zone (~8 km)
+EXPANSION_RATE = 0.15
 
-# Config R specific parameters
-R_HMIN            = 1000.0   # 1 km finest
-R_HMAX            = 7000.0   # 7 km coarsest
-R_OCEAN_VALUE     = 7000.0   # open ocean constant resolution (m)
-R_OCEAN_DEPTH     = -2000.0  # depth threshold for open ocean (m)
-R_SHELF_VALUE     = 4000.0   # shelf minimum resolution (m)
-R_SHELF_UPPER     = -200.0   # shelf upper bound (m)
-R_SHELF_LOWER     = -2000.0  # shelf lower bound (m)
-R_CONTOUR_SIZE    = 2000.0   # shoreline target resolution (m)
-R_CONTOUR_RATE    = 0.01     # shoreline expansion rate (~250 km transition)
-R_CHANNEL_WIDTH   = 2000.0   # channel detection width (m)
-R_CHANNEL_SIZE    = 1000.0   # channel target resolution (m)
-R_CHANNEL_RATE    = 0.01     # channel expansion rate
+# ---------------------------------------------------------------------------
+# Config R parameters (full STOFS domain, 451 tiles)
+# ---------------------------------------------------------------------------
+R_HMIN            = 1000.0
+R_HMAX            = 7000.0
+R_OCEAN_VALUE     = 7000.0
+R_OCEAN_DEPTH     = -2000.0
+R_SHELF_VALUE     = 4000.0
+R_SHELF_UPPER     = -200.0
+R_SHELF_LOWER     = -2000.0
+R_CONTOUR_SIZE    = 2000.0
+R_CONTOUR_RATE    = 0.01
+R_CHANNEL_WIDTH   = 2000.0
+R_CHANNEL_SIZE    = 1000.0
+R_CHANNEL_RATE    = 0.01
+
+# ---------------------------------------------------------------------------
+# Config F-fat parameters (MA/NH/ME region, 44 tiles, 2x finer refinements)
+# Same hmin/hmax as Config R — only refinement targets are finer.
+# hmin=1000m global floor overrides flow_limiter hmin=500m where needed.
+# ---------------------------------------------------------------------------
+FF_HMIN           = 1000.0    # global floor — same as Config R
+FF_HMAX           = 7000.0    # global cap  — same as Config R
+FF_OCEAN_VALUE    = 7000.0    # open ocean constant — same
+FF_OCEAN_DEPTH    = -2000.0   # depth threshold — same
+FF_SHELF_VALUE    = 2000.0    # shelf constraint — 2x finer than R (was 4000m)
+FF_SHELF_UPPER    = -200.0
+FF_SHELF_LOWER    = -2000.0
+FF_CONTOUR_SIZE   = 1000.0    # shoreline target — 2x finer than R (was 2000m)
+FF_CONTOUR_RATE   = 0.01
+FF_FLOW_HMIN      = 500.0     # flow limiter hmin — 2x finer (was 1000m)
+FF_CHANNEL_WIDTH  = 2000.0    # channel width — same
+FF_CHANNEL_SIZE   = 500.0     # channel target — 2x finer (was 1000m)
+FF_CHANNEL_RATE   = 0.01
 
 # ---------------------------------------------------------------------------
 # Index-modulo scheme (standard A-E configs)
@@ -96,19 +118,17 @@ R_CHANNEL_RATE    = 0.01     # channel expansion rate
 MODULO_STRIDE = 6
 
 # ---------------------------------------------------------------------------
-# Fixed lat/lon boxes for shape-based refinements (Configs F, G)
-# (lon_min, lat_min, lon_max, lat_max) in EPSG:4326
+# Fixed lat/lon boxes (Configs F-anas, G)
 # ---------------------------------------------------------------------------
-BOX1 = (-85.0, 25.0, -82.0, 31.0)   # West Florida shelf
-BOX2 = (-80.0, 31.0, -77.0, 35.0)   # SC/GA coast
-BOX3 = (-90.0, 28.0, -86.0, 31.0)   # Gulf Coast
+BOX1 = (-85.0, 25.0, -82.0, 31.0)
+BOX2 = (-80.0, 31.0, -77.0, 35.0)
+BOX3 = (-90.0, 28.0, -86.0, 31.0)
 
 
 # ---------------------------------------------------------------------------
-# Module-level helpers for topo_func_constraint
+# Module-level helpers
 # ---------------------------------------------------------------------------
 def _half_depth(depth: np.ndarray) -> np.ndarray:
-    """Mesh size = |depth| / 2, used by topo_func_constraint."""
     return np.abs(depth) / 2.0
 
 
@@ -117,7 +137,6 @@ def _half_depth(depth: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 def load_ordered_rasters(manifest: Dict) -> Tuple[List[str], List[Dict]]:
-    """Return raster paths + metadata sorted by priority (GEBCO first)."""
     ordered = sorted(
         manifest.items(),
         key=lambda kv: kv[1].get("priority", 99),
@@ -135,7 +154,6 @@ def load_ordered_rasters(manifest: Dict) -> Tuple[List[str], List[Dict]]:
 
 
 def _cudem_indices_by_class(metas: List[Dict]) -> Dict[int, List[int]]:
-    """Group CUDEM raster-list indices by modulo class."""
     classes: Dict[int, List[int]] = {c: [] for c in range(MODULO_STRIDE)}
     cudem_pos = 0
     for i, meta in enumerate(metas):
@@ -148,12 +166,10 @@ def _cudem_indices_by_class(metas: List[Dict]) -> Dict[int, List[int]]:
 
 
 def _all_indices(metas: List[Dict]) -> List[int]:
-    """Return indices of all tiles (GEBCO + CUDEM)."""
     return list(range(len(metas)))
 
 
 def _cudem_only_indices(metas: List[Dict]) -> List[int]:
-    """Return indices of CUDEM tiles only."""
     return [i for i, m in enumerate(metas) if m.get("source") != "gebco"]
 
 
@@ -162,11 +178,10 @@ def _cudem_only_indices(metas: List[Dict]) -> List[int]:
 # ---------------------------------------------------------------------------
 
 def build_geom(raster_paths: List[str], domain_shape, nprocs: int):
-    """Build a GeomCollector clipped to the STOFS-3D-Atlantic domain."""
     _logger.info(
         f"Building Geom from {len(raster_paths)} DEMs (nprocs={nprocs})"
     )
-    geom = Geom(
+    return Geom(
         raster_paths,
         base_shape=domain_shape,
         base_shape_crs="EPSG:4326",
@@ -174,7 +189,6 @@ def build_geom(raster_paths: List[str], domain_shape, nprocs: int):
         zmax=10.0,
         nprocs=nprocs,
     )
-    return geom
 
 
 # ---------------------------------------------------------------------------
@@ -193,10 +207,10 @@ def build_hfun(
     skip_constraints: bool = False,
     skip_box_refinements: bool = False,
     all_fast_refinements: bool = False,
-    # Config F / G
+    # Config F-anas / G (Anas PR benchmarks)
     config_f: bool = False,
     config_g: bool = False,
-    # Config R and isolation runs
+    # Config R and isolation runs (full STOFS domain)
     config_r: bool = False,
     config_r0: bool = False,
     config_r1: bool = False,
@@ -204,53 +218,36 @@ def build_hfun(
     config_r3: bool = False,
     config_r4: bool = False,
     config_r5: bool = False,
+    # Config F-fat and isolation runs (MA/NH/ME, 2x finer)
+    config_ffat: bool = False,
+    config_f0: bool = False,
+    config_f1: bool = False,
+    config_f2: bool = False,
+    config_f3: bool = False,
+    config_f4: bool = False,
+    config_f5: bool = False,
 ):
-    """Build an HfunCollector and apply all refinements.
-
-    Parameters
-    ----------
-    raster_paths : list of str
-        DEM paths in ascending-priority order (GEBCO first).
-    raster_metas : list of dict
-        Parallel metadata for each raster.
-    domain_shape : Polygon or MultiPolygon
-        Domain boundary.
-    nprocs : int
-        Worker count per rank.
-    execution_mode : str
-        One of 'serial', 'parallel', 'mpi'.
-    config_r : bool
-        Full production recipe (all 5 Config R operations).
-    config_r0 : bool
-        Isolation: no refinements (flat background).
-    config_r1 : bool
-        Isolation: add_constant_value only (open ocean 7km).
-    config_r2 : bool
-        Isolation: add_topo_bound_constraint only (shelf 4km).
-    config_r3 : bool
-        Isolation: add_contour only (shoreline 2km).
-    config_r4 : bool
-        Isolation: add_subtidal_flow_limiter only (1km).
-    config_r5 : bool
-        Isolation: add_channel only (2km wide, 1km).
-
-    Returns
-    -------
-    Hfun (HfunCollector)
-    """
+    """Build an HfunCollector and apply all refinements."""
     _logger.info(
         f"Building Hfun from {len(raster_paths)} DEMs "
-        f"(mode={execution_mode}, nprocs={nprocs}, "
-        f"hmin={GLOBAL_HMIN}, hmax={GLOBAL_HMAX})"
+        f"(mode={execution_mode}, nprocs={nprocs})"
     )
 
-    # Determine hmin/hmax — Config R uses its own bounds
     is_r_config = any([
         config_r, config_r0, config_r1, config_r2,
         config_r3, config_r4, config_r5,
     ])
-    hmin = R_HMIN if is_r_config else GLOBAL_HMIN
-    hmax = R_HMAX if is_r_config else GLOBAL_HMAX
+    is_ff_config = any([
+        config_ffat, config_f0, config_f1, config_f2,
+        config_f3, config_f4, config_f5,
+    ])
+
+    if is_ff_config:
+        hmin, hmax = FF_HMIN, FF_HMAX
+    elif is_r_config:
+        hmin, hmax = R_HMIN, R_HMAX
+    else:
+        hmin, hmax = GLOBAL_HMIN, GLOBAL_HMAX
 
     hfun = Hfun(
         raster_paths,
@@ -274,23 +271,185 @@ def build_hfun(
     cudem_idx = _cudem_only_indices(raster_metas)
 
     # =========================================================================
-    # Config R0 — flat background (no refinements)
+    # Config F0 — flat background
     # =========================================================================
-    if config_r0:
+    if config_f0:
         _logger.info(
-            "Config R0: flat background — no refinements applied. "
+            f"Config F0: flat background — no refinements. "
             f"hmin={hmin}m hmax={hmax}m"
         )
         return hfun
 
     # =========================================================================
-    # Config R1 — open ocean constant 7km only
+    # Config F1 — open ocean constant only
+    # =========================================================================
+    if config_f1:
+        _logger.info(
+            f"Config F1: add_constant_value only "
+            f"(value={FF_OCEAN_VALUE}m, upper_bound={FF_OCEAN_DEPTH}m)"
+        )
+        hfun.add_constant_value(
+            value=FF_OCEAN_VALUE,
+            upper_bound=FF_OCEAN_DEPTH,
+            source_index=all_idx,
+        )
+        return hfun
+
+    # =========================================================================
+    # Config F2 — shelf constraint only
+    # =========================================================================
+    if config_f2:
+        _logger.info(
+            f"Config F2: add_topo_bound_constraint only "
+            f"(value={FF_SHELF_VALUE}m, "
+            f"lower={FF_SHELF_LOWER}m, upper={FF_SHELF_UPPER}m, min)"
+        )
+        hfun.add_topo_bound_constraint(
+            value=FF_SHELF_VALUE,
+            lower_bound=FF_SHELF_LOWER,
+            upper_bound=FF_SHELF_UPPER,
+            value_type="min",
+            source_index=all_idx,
+        )
+        return hfun
+
+    # =========================================================================
+    # Config F3 — shoreline contour only
+    # =========================================================================
+    if config_f3:
+        _logger.info(
+            f"Config F3: add_contour only "
+            f"(level=0m, rate={FF_CONTOUR_RATE}, size={FF_CONTOUR_SIZE}m)"
+        )
+        hfun.add_contour(
+            level=0.0,
+            expansion_rate=FF_CONTOUR_RATE,
+            target_size=FF_CONTOUR_SIZE,
+        )
+        return hfun
+
+    # =========================================================================
+    # Config F4 — subtidal flow limiter only
+    # =========================================================================
+    if config_f4:
+        _logger.info(
+            f"Config F4: add_subtidal_flow_limiter only "
+            f"(hmin={FF_FLOW_HMIN}m, hmax={FF_HMAX}m)"
+        )
+        hfun.add_subtidal_flow_limiter(
+            hmin=FF_FLOW_HMIN,
+            hmax=FF_HMAX,
+            source_index=all_idx,
+        )
+        return hfun
+
+    # =========================================================================
+    # Config F5 — channel detection only
+    # =========================================================================
+    if config_f5:
+        _logger.info(
+            f"Config F5: add_channel only "
+            f"(width={FF_CHANNEL_WIDTH}m, size={FF_CHANNEL_SIZE}m, "
+            f"rate={FF_CHANNEL_RATE})"
+        )
+        hfun.add_channel(
+            level=0.0,
+            width=FF_CHANNEL_WIDTH,
+            target_size=FF_CHANNEL_SIZE,
+            expansion_rate=FF_CHANNEL_RATE,
+        )
+        return hfun
+
+    # =========================================================================
+    # Config F-fat — full 2x finer production recipe (MA/NH/ME, 44 tiles)
+    # =========================================================================
+    if config_ffat:
+        _logger.info(
+            f"Config F-fat: full 2x finer production recipe "
+            f"on {len(all_idx)} tiles (MA/NH/ME + split GEBCO)"
+        )
+        _logger.info(
+            f"  Parameters: shelf={FF_SHELF_VALUE}m, "
+            f"contour={FF_CONTOUR_SIZE}m, "
+            f"flow_hmin={FF_FLOW_HMIN}m, "
+            f"channel={FF_CHANNEL_SIZE}m"
+        )
+
+        _logger.info(
+            f"  1. add_constant_value "
+            f"(value={FF_OCEAN_VALUE}m, upper_bound={FF_OCEAN_DEPTH}m)"
+        )
+        hfun.add_constant_value(
+            value=FF_OCEAN_VALUE,
+            upper_bound=FF_OCEAN_DEPTH,
+            source_index=all_idx,
+        )
+
+        _logger.info(
+            f"  2. add_topo_bound_constraint "
+            f"(value={FF_SHELF_VALUE}m, "
+            f"lower={FF_SHELF_LOWER}m, upper={FF_SHELF_UPPER}m, min)"
+        )
+        hfun.add_topo_bound_constraint(
+            value=FF_SHELF_VALUE,
+            lower_bound=FF_SHELF_LOWER,
+            upper_bound=FF_SHELF_UPPER,
+            value_type="min",
+            source_index=all_idx,
+        )
+
+        _logger.info(
+            f"  3. add_contour "
+            f"(level=0m, rate={FF_CONTOUR_RATE}, size={FF_CONTOUR_SIZE}m)"
+        )
+        hfun.add_contour(
+            level=0.0,
+            expansion_rate=FF_CONTOUR_RATE,
+            target_size=FF_CONTOUR_SIZE,
+        )
+
+        _logger.info(
+            f"  4. add_subtidal_flow_limiter "
+            f"(hmin={FF_FLOW_HMIN}m, hmax={FF_HMAX}m)"
+        )
+        hfun.add_subtidal_flow_limiter(
+            hmin=FF_FLOW_HMIN,
+            hmax=FF_HMAX,
+            source_index=all_idx,
+        )
+
+        _logger.info(
+            f"  5. add_channel "
+            f"(width={FF_CHANNEL_WIDTH}m, size={FF_CHANNEL_SIZE}m, "
+            f"rate={FF_CHANNEL_RATE})"
+        )
+        hfun.add_channel(
+            level=0.0,
+            width=FF_CHANNEL_WIDTH,
+            target_size=FF_CHANNEL_SIZE,
+            expansion_rate=FF_CHANNEL_RATE,
+        )
+
+        _logger.info("Config F-fat refinements applied.")
+        return hfun
+
+    # =========================================================================
+    # Config R0 — flat background
+    # =========================================================================
+    if config_r0:
+        _logger.info(
+            f"Config R0: flat background — no refinements. "
+            f"hmin={hmin}m hmax={hmax}m"
+        )
+        return hfun
+
+    # =========================================================================
+    # Config R1 — open ocean constant only
     # =========================================================================
     if config_r1:
         _logger.info(
             f"Config R1: add_constant_value only "
-            f"(value={R_OCEAN_VALUE}m, upper_bound={R_OCEAN_DEPTH}m) "
-            f"on all {len(all_idx)} tiles"
+            f"(value={R_OCEAN_VALUE}m, upper_bound={R_OCEAN_DEPTH}m)"
         )
         hfun.add_constant_value(
             value=R_OCEAN_VALUE,
@@ -306,8 +465,7 @@ def build_hfun(
         _logger.info(
             f"Config R2: add_topo_bound_constraint only "
             f"(value={R_SHELF_VALUE}m, "
-            f"lower={R_SHELF_LOWER}m, upper={R_SHELF_UPPER}m, min) "
-            f"on all {len(all_idx)} tiles"
+            f"lower={R_SHELF_LOWER}m, upper={R_SHELF_UPPER}m, min)"
         )
         hfun.add_topo_bound_constraint(
             value=R_SHELF_VALUE,
@@ -339,8 +497,7 @@ def build_hfun(
     if config_r4:
         _logger.info(
             f"Config R4: add_subtidal_flow_limiter only "
-            f"(hmin={R_HMIN}m, hmax={R_HMAX}m) "
-            f"on all {len(all_idx)} tiles"
+            f"(hmin={R_HMIN}m, hmax={R_HMAX}m)"
         )
         hfun.add_subtidal_flow_limiter(
             hmin=R_HMIN,
@@ -367,25 +524,16 @@ def build_hfun(
         return hfun
 
     # =========================================================================
-    # Config R — full production recipe
+    # Config R — full production recipe (451 tiles)
     # =========================================================================
     if config_r:
         _logger.info(
             f"Config R: full production recipe on {len(all_idx)} tiles"
         )
-        _logger.info(
-            f"  1. add_constant_value     : value={R_OCEAN_VALUE}m, "
-            f"upper_bound={R_OCEAN_DEPTH}m"
-        )
         hfun.add_constant_value(
             value=R_OCEAN_VALUE,
             upper_bound=R_OCEAN_DEPTH,
             source_index=all_idx,
-        )
-
-        _logger.info(
-            f"  2. add_topo_bound_constraint: value={R_SHELF_VALUE}m, "
-            f"lower={R_SHELF_LOWER}m, upper={R_SHELF_UPPER}m, min"
         )
         hfun.add_topo_bound_constraint(
             value=R_SHELF_VALUE,
@@ -394,30 +542,15 @@ def build_hfun(
             value_type="min",
             source_index=all_idx,
         )
-
-        _logger.info(
-            f"  3. add_contour            : level=0m, "
-            f"rate={R_CONTOUR_RATE}, size={R_CONTOUR_SIZE}m"
-        )
         hfun.add_contour(
             level=0.0,
             expansion_rate=R_CONTOUR_RATE,
             target_size=R_CONTOUR_SIZE,
         )
-
-        _logger.info(
-            f"  4. add_subtidal_flow_limiter: "
-            f"hmin={R_HMIN}m, hmax={R_HMAX}m"
-        )
         hfun.add_subtidal_flow_limiter(
             hmin=R_HMIN,
             hmax=R_HMAX,
             source_index=all_idx,
-        )
-
-        _logger.info(
-            f"  5. add_channel            : width={R_CHANNEL_WIDTH}m, "
-            f"size={R_CHANNEL_SIZE}m, rate={R_CHANNEL_RATE}"
         )
         hfun.add_channel(
             level=0.0,
@@ -425,17 +558,16 @@ def build_hfun(
             target_size=R_CHANNEL_SIZE,
             expansion_rate=R_CHANNEL_RATE,
         )
-
         _logger.info("Config R refinements applied.")
         return hfun
 
     # =========================================================================
-    # Config F — all MPI-dispatched, no shapes
+    # Config F-anas — all MPI-dispatched, no shapes (Anas PR Config E)
     # =========================================================================
     if config_f:
         _logger.info(
-            "Config F: flow_limiter + const_value + constraints + "
-            "contour/channel (all tiles, no boxes)"
+            "Config F-anas: flow_limiter + const_value + constraints + "
+            "contour/channel (all CUDEM tiles, no boxes)"
         )
         hfun.add_subtidal_flow_limiter(
             hmin=GLOBAL_HMIN, hmax=GLOBAL_HMAX,
@@ -467,15 +599,15 @@ def build_hfun(
             target_size=3500.0,
             expansion_rate=EXPANSION_RATE,
         )
-        _logger.info("Config F refinements applied.")
+        _logger.info("Config F-anas refinements applied.")
         return hfun
 
     # =========================================================================
-    # Config G — Config F + shapes
+    # Config G — Config F-anas + shapes
     # =========================================================================
     if config_g:
         _logger.info(
-            "Config G: Config F + patch + feature (BOX2 + BOX3)"
+            "Config G: Config F-anas + patch + feature (BOX2 + BOX3)"
         )
         hfun.add_subtidal_flow_limiter(
             hmin=GLOBAL_HMIN, hmax=GLOBAL_HMAX,
@@ -678,21 +810,6 @@ def _main() -> None:
         f"Loaded {len(raster_paths)} rasters "
         f"({n_gebco} GEBCO, {n_cudem} CUDEM)"
     )
-    classes = _cudem_indices_by_class(raster_metas)
-    names = {
-        0: "subtidal_flow_limiter",
-        1: "constant_value",
-        2: "topo_bound_constraint",
-        3: "topo_func_constraint",
-        4: "courant_constraint",
-        5: "(skipped)",
-    }
-    _logger.info("Index-modulo classes:")
-    for cls, idxs in classes.items():
-        _logger.info(
-            f"  class {cls} {names[cls]:<24} -> {len(idxs)} tiles "
-            f"{idxs[:8]}{'...' if len(idxs) > 8 else ''}"
-        )
 
 
 if __name__ == "__main__":
