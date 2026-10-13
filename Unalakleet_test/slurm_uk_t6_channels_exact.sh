@@ -20,8 +20,8 @@ set -euo pipefail
 
 # ── Environment ───────────────────────────────────────────────────────────────
 module purge
-
-
+module load intel-oneapi-compilers/2022.2.1
+module load intel-oneapi-mpi/2021.7.1
 module load hdf5/1.12.2
 module load netcdf-c/4.9.0
 module load netcdf-fortran/4.6.0
@@ -47,7 +47,7 @@ echo "  Date   : $(date)"
 echo "  Output : /work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/Unalakleet_test/results/test6_channels/serial/exact"
 echo "============================================================="
 
-python build_unalakleet_mesh.py --test 6 --mode serial --method exact --results-root '/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/Unalakleet_test/results'
+srun --ntasks=1 python build_unalakleet_mesh.py --test 6 --mode serial --method exact --results-root '/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/Unalakleet_test/results'
 
 echo "============================================================="
 echo "  DONE: Test 6 / serial / exact  $(date)"
