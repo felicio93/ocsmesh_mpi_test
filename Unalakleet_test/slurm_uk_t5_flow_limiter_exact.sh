@@ -1,18 +1,18 @@
 #!/bin/bash
 # =============================================================================
-# Unalakleet Test 5: flow_limiter  |  mode=mpi_no_pool  |  method=exact
+# Unalakleet Test 5: flow_limiter  |  mode=serial  |  method=exact
 # All above + inner tidal flow limiter (hmin=200m, within highres_domain)
 # =============================================================================
-#SBATCH --job-name=uk_t5_e
+#SBATCH --job-name=uk_t5_s_e
 #SBATCH --account=nos-surge
 #SBATCH --partition=hercules
 #SBATCH --nodes=1
-#SBATCH --ntasks=3
+#SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --exclusive
 #SBATCH --time=08:00:00
-#SBATCH --output=logs/uk_t5_exact_%j.out
-#SBATCH --error=logs/uk_t5_exact_%j.err
+#SBATCH --output=logs/uk_t5_serial_exact_%j.out
+#SBATCH --error=logs/uk_t5_serial_exact_%j.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=felicio.cassalho@noaa.gov
 
@@ -32,10 +32,10 @@ export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 
-export TMPDIR="/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/Unalakleet_test/results/test5_flow_limiter/mpi_no_pool/exact/tmp"
-export OCSMESH_SHARED_TMPDIR="/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/Unalakleet_test/results/test5_flow_limiter/mpi_no_pool/exact/tmp"
+export TMPDIR="/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/Unalakleet_test/results/test5_flow_limiter/serial/exact/tmp"
+export OCSMESH_SHARED_TMPDIR="/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/Unalakleet_test/results/test5_flow_limiter/serial/exact/tmp"
 
-mkdir -p "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/Unalakleet_test/results/test5_flow_limiter/mpi_no_pool/exact" "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/Unalakleet_test/results/test5_flow_limiter/mpi_no_pool/exact/tmp" "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/Unalakleet_test/logs"
+mkdir -p "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/Unalakleet_test/results/test5_flow_limiter/serial/exact" "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/Unalakleet_test/results/test5_flow_limiter/serial/exact/tmp" "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/Unalakleet_test/logs"
 
 cd "/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/Unalakleet_test"
 
@@ -44,17 +44,11 @@ echo "  Unalakleet Test 5: flow_limiter  method=exact"
 echo "  Job    : ${SLURM_JOB_ID}"
 echo "  Node   : ${SLURM_NODELIST}"
 echo "  Date   : $(date)"
-echo "  Output : /work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/Unalakleet_test/results/test5_flow_limiter/mpi_no_pool/exact"
+echo "  Output : /work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/Unalakleet_test/results/test5_flow_limiter/serial/exact"
 echo "============================================================="
 
-srun --mpi=pmi2 -n 1 python -c \
-    "from mpi4py import MPI; print('mpi4py OK:', MPI.Get_version())"
-
-srun --mpi=pmi2 \
-    --ntasks=3 \
-    --cpus-per-task=1 \
-    python build_unalakleet_mesh.py --test 5 --mode mpi_no_pool --method exact --results-root '/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/Unalakleet_test/results'
+python build_unalakleet_mesh.py --test 5 --mode serial --method exact --results-root '/work2/noaa/nos-surge/felicioc/OCSMesh_MPI/ocsmesh_mpi_test/Unalakleet_test/results'
 
 echo "============================================================="
-echo "  DONE: Test 5 / mpi_no_pool / exact  $(date)"
+echo "  DONE: Test 5 / serial / exact  $(date)"
 echo "============================================================="
