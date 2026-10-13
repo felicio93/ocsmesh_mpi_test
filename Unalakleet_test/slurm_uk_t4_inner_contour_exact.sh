@@ -21,7 +21,7 @@ set -euo pipefail
 # ── Environment ───────────────────────────────────────────────────────────────
 module purge
 module load intel-oneapi-compilers/2022.2.1
-module load intel-oneapi-mpi/2021.7.1
+
 module load hdf5/1.12.2
 module load netcdf-c/4.9.0
 module load netcdf-fortran/4.6.0
