@@ -46,7 +46,7 @@ CHANNEL_MASK_SHP = _THIS_DIR / "shapes" / "USGS_AK5M_Alaska_Mid_Ac_Clip_mask.shp
 
 # DEMs — order matters: GEBCO first (lowest priority), USGS last (highest)
 DEM_GEBCO = _THIS_DIR / "dems" / "gebco_2026_n65.5_s63.0_w-163.0_e-160.0_geotiff.tif"
-DEM_USGS  = _THIS_DIR / "dems" / "USGS_AK5M_Alaska_Mid_Ac_Clip_river_bathymetry.tif"
+DEM_USGS  = _THIS_DIR / "dems" / "USGS_AK5M_reprojected.tif"
 
 DEM_PATHS = [
     str(DEM_GEBCO),   # index 0 — lowest priority

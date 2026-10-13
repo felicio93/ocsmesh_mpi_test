@@ -174,6 +174,16 @@ def build_hfun(
 
     domain_shape, domain_crs = load_shape(DOMAIN_SHP)
 
+    _logger.info("── VERIFYING DEM PATHS ──")
+    for dem_path in DEM_PATHS:
+        p = Path(dem_path)
+        if p.exists():
+            _logger.info(f"  Path: {p.resolve()}")
+            _logger.info(f"  Size: {p.stat().st_size / 1e6:.2f} MB")
+        else:
+            _logger.error(f"  Path not found: {dem_path}")
+    _logger.info("───────────────────────────")
+
     hfun = Hfun(
         DEM_PATHS,
         hmin=HMIN,
