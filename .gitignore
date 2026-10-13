@@ -1,3 +1,12 @@
 .venv
 logs
 __pycache__/*
+*.tif
+*.tiff
+*.2dm
+NJ_test/results_gaea/
+Unalakleet_test/results/
+Unalakleet_test/logs/
+Unalakleet_test/__pycache__/
+Unalakleet_test/shapes/
+Unalakleet_test/dems/

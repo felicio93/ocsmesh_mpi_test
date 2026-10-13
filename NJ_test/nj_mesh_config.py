@@ -1,6 +1,7 @@
 """NJ_test/nj_mesh_config.py
 
 All mesh generation parameters for the NJ benchmark tests.
+Central place to change any parameter — all other scripts import from here.
 """
 
 from __future__ import annotations
@@ -17,12 +18,19 @@ RESULTS_ROOT    = _THIS_DIR / "results"
 # ---------------------------------------------------------------------------
 # Global mesh size bounds
 # ---------------------------------------------------------------------------
-HMIN =    50.0   # m
-HMAX =  3000.0   # m
+HMIN =    50.0   # m — finest element
+HMAX =  3000.0   # m — coarsest element (open ocean background)
 
 # ---------------------------------------------------------------------------
-# Tests — cumulative refinements
-# Each test ID is run with BOTH method='fast' and method='exact'
+# Test definitions
+# Each test is CUMULATIVE — it includes all refinements from previous tests.
+#
+# Test 0  baseline      no refinements → mesh defaults to hmax everywhere
+# Test 1  depth_bands   + add_constant_value (5 depth bands)
+# Test 2  contour       + add_contour (shoreline 0m, 200m target)
+# Test 3  flow          + add_subtidal_flow_limiter (2 calls)
+# Test 4  channels      + add_channel (tidal inlets only)
+# Test 5  full          all above combined
 # ---------------------------------------------------------------------------
 TESTS = [
     {
@@ -46,7 +54,7 @@ TESTS = [
     {
         "id":          2,
         "name":        "contour",
-        "description": "Depth bands + shoreline contour (0m, 200m, rate=0.001)",
+        "description": "Depth bands + shoreline contour (0m, 200m target, rate=0.001)",
         "depth_bands":     True,
         "contour":         True,
         "flow_limiter":    False,
@@ -64,7 +72,7 @@ TESTS = [
     {
         "id":          4,
         "name":        "channels",
-        "description": "Depth bands + contour + flow limiters + 3 channels",
+        "description": "Depth bands + contour + flow limiters + channel refinement",
         "depth_bands":     True,
         "contour":         True,
         "flow_limiter":    True,
@@ -73,7 +81,7 @@ TESTS = [
     {
         "id":          5,
         "name":        "full",
-        "description": "All refinements — canonical final NJ mesh",
+        "description": "All refinements combined — canonical final NJ mesh",
         "depth_bands":     True,
         "contour":         True,
         "flow_limiter":    True,
@@ -86,6 +94,7 @@ METHODS = ["fast", "exact"]
 
 # ---------------------------------------------------------------------------
 # Depth bands (add_constant_value)
+# Applied deepest first so shallower bands override deeper ones.
 # ---------------------------------------------------------------------------
 DEPTH_BANDS = [
     # (value_m, lower_bound, upper_bound, description)
@@ -97,36 +106,50 @@ DEPTH_BANDS = [
 ]
 
 # ---------------------------------------------------------------------------
-# Contour
+# Contour (add_contour)
 # ---------------------------------------------------------------------------
-CONTOUR_LEVEL          =    0.0
-CONTOUR_EXPANSION_RATE =  0.001
-CONTOUR_TARGET_SIZE    =  200.0   # m
+CONTOUR_LEVEL          =    0.0   # m — shoreline
+CONTOUR_EXPANSION_RATE =  0.001   # smooth gradation away from shoreline
+CONTOUR_TARGET_SIZE    =  200.0   # m — resolution at the shoreline
 
 # ---------------------------------------------------------------------------
-# Flow limiters
+# Subtidal flow limiters (add_subtidal_flow_limiter)
+# hmax matches global HMAX=3000m to avoid overriding background resolution
 # ---------------------------------------------------------------------------
 FLOW_LIMITERS = [
     # (hmin_m, hmax_m, lower_bound, upper_bound, description)
-    # hmax matches global HMAX=3000m to avoid overriding the background resolution
     (100.0,  3000.0, -10.0,   0.0,  "nearshore  0→-10m,  hmin=100m"),
     (500.0,  3000.0, -100.0, -10.0, "subtidal -10→-100m, hmin=500m"),
 ]
 
 # ---------------------------------------------------------------------------
-# Channels
+# Channel refinements (add_channel)
+#
+# Goal: resolve tidal inlets (Barnegat Inlet, Beach Haven Inlet, Absecon
+# Inlet) and main back-barrier channels without flooding the entire domain
+# with fine resolution.
+#
+# Key parameters:
+#   width        — minimum channel width to detect. 1000m captures tidal
+#                  inlets without flagging entire bays (Barnegat Bay ~2-3km
+#                  wide — wider than this threshold so not flagged as channel)
+#   target_size  — resolution inside detected channels. 100m is fine enough
+#                  for tidal inlet hydrodynamics.
+#   expansion_rate=0.1 — coarsens 10x faster than the previous 0.01 setting,
+#                  so fine resolution stays confined to the inlet throat
+#                  rather than spreading across the surrounding bay.
+#
+# Previous config (width=2000m, target=500m, rate=0.01) and
+# (width=500m, target=100m, rate=0.01) produced 50m resolution everywhere
+# because the slow expansion rate flooded the entire domain.
 # ---------------------------------------------------------------------------
 CHANNELS = [
     # (width_m, target_size_m, expansion_rate, description)
-    # NOTE: only the 2000m channel is kept. The 500m and 100m channels
-    # are computationally prohibitive on 42 tiles of 1/9" (~3m) resolution
-    # because add_channel runs serially on rank 0 (not yet MPI-parallelized).
-    # These will be re-enabled once add_channel is MPI-parallelized.
-    (2000.0, 500.0, 0.01, "large coastal inlets   width=2000m target=500m"),
+    (1000.0, 100.0, 0.1, "tidal inlets and back-barrier channels  width=1000m  target=100m"),
 ]
 
 # ---------------------------------------------------------------------------
-# MeshDriver
+# MeshDriver settings
 # ---------------------------------------------------------------------------
 MESH_ENGINE   = "gmsh"
 MESH_BND_REPR = "adapt"
@@ -134,7 +157,7 @@ MESH_BND_REPR = "adapt"
 # ---------------------------------------------------------------------------
 # Execution modes and resource allocation
 # ---------------------------------------------------------------------------
-# 42 tiles total (2 GEBCO + 20 third + 20 ninth)
+# Total tiles in manifest: 42 (2 GEBCO + 20 third + 20 ninth)
 N_TILES           = 42
 
 MPI_NOPOOL_NTASKS = N_TILES + 1   # 43 ranks (1 manager + 42 workers)
@@ -142,12 +165,12 @@ MPI_NOPOOL_CPUS   = 1
 
 MPI_HYBRID_NTASKS = 6             # 1 manager + 5 workers
 MPI_HYBRID_CPUS   = 7             # 7 cores per rank
-MPI_HYBRID_CORES  =  7            # alias used in build_nj_mesh.py
+MPI_HYBRID_CORES  = 7             # alias used in build_nj_mesh.py
 
 PARALLEL_NPROCS   = 40
 SERIAL_NPROCS     = 1
 
-# Hercules
+# Hercules SLURM settings
 SLURM_ACCOUNT   = "nos-surge"
 SLURM_PARTITION = "hercules"
 SLURM_EMAIL     = "felicio.cassalho@noaa.gov"
