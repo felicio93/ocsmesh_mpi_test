@@ -1,6 +1,8 @@
-"""NJ_test/nj_mesh_config.py
+"""NJ_test/nj_mesh_config_gaea.py
 
-All mesh generation parameters for the NJ benchmark tests.
+Gaea C6 mesh parameters for the NJ benchmark tests. Same recipe as
+nj_mesh_config.py (Hercules) except CHANNELS, the test 4/5 definitions,
+the results root and the SLURM settings.
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ from pathlib import Path
 _THIS_DIR       = Path(__file__).resolve().parent
 DOMAIN_SHP      = _THIS_DIR / "domain" / "AOI_domain_FC.shp"
 MANIFEST_PATH   = _THIS_DIR / "NJ_dem_manifest.json"
-RESULTS_ROOT    = _THIS_DIR / "results"
+RESULTS_ROOT    = _THIS_DIR / "results_gaea"
 
 # ---------------------------------------------------------------------------
 # Global mesh size bounds
@@ -21,8 +23,12 @@ HMIN =    50.0   # m
 HMAX =  3000.0   # m
 
 # ---------------------------------------------------------------------------
-# Tests — cumulative refinements
-# Each test ID is run with BOTH method='fast' and method='exact'
+# Tests
+# Tests 0-3 are cumulative; test 4 isolates the channel refinement;
+# test 5 applies everything (tests 1-4 combined).
+# Each test ID is run with BOTH method='fast' and method='exact'.
+# NOTE: OCSMesh only distributes contours/channels/flow limiters for
+# method='exact'; with 'fast' parallel/mpi give no speedup there.
 # ---------------------------------------------------------------------------
 TESTS = [
     {
@@ -46,7 +52,7 @@ TESTS = [
     {
         "id":          2,
         "name":        "contour",
-        "description": "Depth bands + shoreline contour (0m, 200m, rate=0.001)",
+        "description": "Depth bands + shoreline contour (level 0m, target 200m, rate=0.001)",
         "depth_bands":     True,
         "contour":         True,
         "flow_limiter":    False,
@@ -64,16 +70,16 @@ TESTS = [
     {
         "id":          4,
         "name":        "channels",
-        "description": "Depth bands + contour + flow limiters + 3 channels",
-        "depth_bands":     True,
-        "contour":         True,
-        "flow_limiter":    True,
+        "description": "Channel refinement only (1 channel, 2000m width)",
+        "depth_bands":     False,
+        "contour":         False,
+        "flow_limiter":    False,
         "channels":        True,
     },
     {
         "id":          5,
         "name":        "full",
-        "description": "All refinements — canonical final NJ mesh",
+        "description": "All refinements (tests 1-4 combined) — canonical final NJ mesh",
         "depth_bands":     True,
         "contour":         True,
         "flow_limiter":    True,
@@ -118,10 +124,8 @@ FLOW_LIMITERS = [
 # ---------------------------------------------------------------------------
 CHANNELS = [
     # (width_m, target_size_m, expansion_rate, description)
-    # NOTE: only the 2000m channel is kept. The 500m and 100m channels
-    # are computationally prohibitive on 42 tiles of 1/9" (~3m) resolution
-    # because add_channel runs serially on rank 0 (not yet MPI-parallelized).
-    # These will be re-enabled once add_channel is MPI-parallelized.
+    # Single channel only: width=2000m, rate=0.01 (target_size 500m is
+    # the element size inside the channel, not a second channel).
     (2000.0, 500.0, 0.01, "large coastal inlets   width=2000m target=500m"),
 ]
 
@@ -140,6 +144,12 @@ N_TILES           = 42
 MPI_NOPOOL_NTASKS = N_TILES + 1   # 43 ranks (1 manager + 42 workers)
 MPI_NOPOOL_CPUS   = 1
 
+# Multi-node MPI: same 1-core-per-rank layout as mpi_no_pool, but ranks
+# are spread over MPI_MULTINODE_NODES nodes (ntasks-per-node enforced,
+# otherwise Slurm's block distribution packs all ranks on node 1).
+MPI_MULTINODE_NODES = 2
+MPI_MULTINODE_TASKS_PER_NODE = -(-MPI_NOPOOL_NTASKS // MPI_MULTINODE_NODES)
+
 MPI_HYBRID_NTASKS = 6             # 1 manager + 5 workers
 MPI_HYBRID_CPUS   = 7             # 7 cores per rank
 MPI_HYBRID_CORES  =  7            # alias used in build_nj_mesh.py
@@ -147,7 +157,7 @@ MPI_HYBRID_CORES  =  7            # alias used in build_nj_mesh.py
 PARALLEL_NPROCS   = 40
 SERIAL_NPROCS     = 1
 
-# Hercules
+# Gaea C6
 SLURM_ACCOUNT   = "nos-surge"
 SLURM_PARTITION = "batch"
 SLURM_EMAIL     = "felicio.cassalho@noaa.gov"

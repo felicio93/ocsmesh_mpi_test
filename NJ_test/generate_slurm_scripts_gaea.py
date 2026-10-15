@@ -1,13 +1,14 @@
 """NJ_test/generate_slurm_scripts.py
 
 Generate one SLURM script per (test, mode, method) combination.
-Produces 48 scripts: 6 tests × 4 modes × 2 methods.
+Produces 60 scripts: 6 tests × 5 modes × 2 methods.
+Written to slurm_gaea/ so the Hercules scripts are never overwritten.
 
 Usage
 -----
-    python generate_slurm_scripts.py
-    python generate_slurm_scripts.py --submit
-    python generate_slurm_scripts.py --test 0 --submit
+    python generate_slurm_scripts_gaea.py
+    python generate_slurm_scripts_gaea.py --submit
+    python generate_slurm_scripts_gaea.py --test 0 --submit
 """
 
 from __future__ import annotations
@@ -23,54 +24,36 @@ from nj_mesh_config_gaea import (
     SLURM_ACCOUNT, SLURM_PARTITION, SLURM_EMAIL,
     MPI_NOPOOL_NTASKS, MPI_NOPOOL_CPUS,
     MPI_HYBRID_NTASKS, MPI_HYBRID_CPUS,
-    PARALLEL_NPROCS,
+    MPI_MULTINODE_NODES, MPI_MULTINODE_TASKS_PER_NODE,
+    PARALLEL_NPROCS, RESULTS_ROOT,
 )
 
 _THIS_DIR    = Path(__file__).resolve().parent
 SCRIPT_DIR   = _THIS_DIR
-RESULTS_ROOT = _THIS_DIR / "results"
+SLURM_DIR    = _THIS_DIR / "slurm_gaea"       # keeps Hercules scripts untouched
+LOG_DIR      = _THIS_DIR / "logs_gaea"
 MANIFEST     = _THIS_DIR / "NJ_dem_manifest.json"
-PROJ         = "/gpfs/f6/nos-surge/scratch/Felicio.Cassalho/OCSMesh_MPI"
+BUILD_SCRIPT = "build_nj_mesh_gaea.py"
 CONDA_ENV    = "ocsmesh_mpi_test"
+WALLTIME     = "16:00:00"
 
-# ---------------------------------------------------------------------------
-# Walltime estimates per (test_id, mode)
-# ---------------------------------------------------------------------------
-_WALLTIMES = {
-    (0, "serial"):       "16:00:00",
-    (0, "parallel"):     "16:00:00",
-    (0, "mpi_no_pool"):  "16:00:00",
-    (0, "mpi_hybrid"):   "16:00:00",
-    (1, "serial"):       "16:00:00",
-    (1, "parallel"):     "16:00:00",
-    (1, "mpi_no_pool"):  "16:00:00",
-    (1, "mpi_hybrid"):   "16:00:00",
-    (2, "serial"):       "16:00:00",
-    (2, "parallel"):     "16:00:00",
-    (2, "mpi_no_pool"):  "16:00:00",
-    (2, "mpi_hybrid"):   "16:00:00",
-    (3, "serial"):       "16:00:00",
-    (3, "parallel"):     "16:00:00",
-    (3, "mpi_no_pool"):  "16:00:00",
-    (3, "mpi_hybrid"):   "16:00:00",
-    (4, "serial"):       "16:00:00",
-    (4, "parallel"):     "16:00:00",
-    (4, "mpi_no_pool"):  "16:00:00",
-    (4, "mpi_hybrid"):   "16:00:00",
-    (5, "serial"):       "16:00:00",
-    (5, "parallel"):     "16:00:00",
-    (5, "mpi_no_pool"):  "16:00:00",
-    (5, "mpi_hybrid"):   "16:00:00",
-}
+MODES = ["serial", "parallel", "mpi_no_pool", "mpi_hybrid", "mpi_multinode"]
 
 # ---------------------------------------------------------------------------
 # SLURM resource allocation per mode
 # ---------------------------------------------------------------------------
 _SLURM_RESOURCES = {
-    "serial":      {"ntasks": 1,                 "cpus": 1},
-    "parallel":    {"ntasks": 1,                 "cpus": PARALLEL_NPROCS},
-    "mpi_no_pool": {"ntasks": MPI_NOPOOL_NTASKS, "cpus": MPI_NOPOOL_CPUS},
-    "mpi_hybrid":  {"ntasks": MPI_HYBRID_NTASKS, "cpus": MPI_HYBRID_CPUS},
+    "serial":        {"nodes": 1, "ntasks": 1,                 "cpus": 1,
+                      "per_node": None},
+    "parallel":      {"nodes": 1, "ntasks": 1,                 "cpus": PARALLEL_NPROCS,
+                      "per_node": None},
+    "mpi_no_pool":   {"nodes": 1, "ntasks": MPI_NOPOOL_NTASKS, "cpus": MPI_NOPOOL_CPUS,
+                      "per_node": None},
+    "mpi_hybrid":    {"nodes": 1, "ntasks": MPI_HYBRID_NTASKS, "cpus": MPI_HYBRID_CPUS,
+                      "per_node": None},
+    "mpi_multinode": {"nodes": MPI_MULTINODE_NODES, "ntasks": MPI_NOPOOL_NTASKS,
+                      "cpus": MPI_NOPOOL_CPUS,
+                      "per_node": MPI_MULTINODE_TASKS_PER_NODE},
 }
 
 
@@ -82,11 +65,13 @@ def generate_script(
 ) -> Path:
     """Generate one SLURM script and return its path."""
 
-    job_name = f"nj_t{test_id}_{mode[:3]}_{method[:1]}"
-    walltime = _WALLTIMES.get((test_id, mode), "16:00:00")
+    job_name = f"nj_t{test_id}_{mode}_{method[:1]}"
+    walltime = WALLTIME
     res      = _SLURM_RESOURCES[mode]
+    nodes    = res["nodes"]
     ntasks   = res["ntasks"]
     cpus     = res["cpus"]
+    per_node = res["per_node"]
 
     out_dir = (
         f"{RESULTS_ROOT}/test{test_id}_{test_name}/{mode}/{method}"
@@ -95,7 +80,7 @@ def generate_script(
 
     # Build the Python command arguments (same for all modes)
     py_args = (
-        f"build_nj_mesh.py "
+        f"{BUILD_SCRIPT} "
         f"--test {test_id} "
         f"--mode {mode} "
         f"--method {method} "
@@ -103,34 +88,22 @@ def generate_script(
         f"--results-root '{RESULTS_ROOT}'"
     )
 
-    # Build the srun line — Python is the direct executable for all modes
-    if mode in ("serial", "parallel"):
-        srun_line = (
-            f"srun -n 1 \\\n"
-            f"    python {py_args}"
-        )
-    elif mode == "mpi_no_pool":
-        srun_line = (
-            f"srun \\\n"
-            f"    --ntasks={ntasks} \\\n"
-            f"    --cpus-per-task={cpus} \\\n"
-            f"    python {py_args}"
-        )
-    elif mode == "mpi_hybrid":
-        srun_line = (
-            f"srun \\\n"
-            f"    --ntasks={ntasks} \\\n"
-            f"    --cpus-per-task={cpus} \\\n"
-            f"    --overcommit \\\n"
-            f"    python {py_args}"
-        )
+    # --cpus-per-task is repeated on srun: Slurm >= 22.05 no longer
+    # inherits it from sbatch, which would pin the step to 1 core.
+    srun_line = (
+        f"srun \\\n"
+        f"    --nodes={nodes} \\\n"
+        f"    --ntasks={ntasks} \\\n"
+        f"    --cpus-per-task={cpus} \\\n"
+        f"    --cpu-bind=cores \\\n"
+        f"    python {py_args}"
+    )
 
     description = next(
         t["description"] for t in TESTS if t["id"] == test_id)
 
-    overcommit_note = (
-        "# --overcommit: 6 ranks × 7 cores = 42 cores, fits on 1 node\n"
-        if mode == "mpi_hybrid" else ""
+    per_node_line = (
+        f"#SBATCH --ntasks-per-node={per_node}\n" if per_node else ""
     )
 
     content = f"""#!/bin/bash
@@ -141,19 +114,18 @@ def generate_script(
 #SBATCH --job-name={job_name}
 #SBATCH --account={SLURM_ACCOUNT}
 #SBATCH --partition={SLURM_PARTITION}
-#SBATCH --nodes=1
+#SBATCH --nodes={nodes}
 #SBATCH --ntasks={ntasks}
-#SBATCH --cpus-per-task={cpus}
+{per_node_line}#SBATCH --cpus-per-task={cpus}
 #SBATCH --exclusive
 #SBATCH --clusters=c6
 #SBATCH --qos=normal
 #SBATCH --time={walltime}
-#SBATCH --output=logs/nj_t{test_id}_{mode}_{method}_%j.out
-#SBATCH --error=logs/nj_t{test_id}_{mode}_{method}_%j.err
+#SBATCH --output={LOG_DIR}/nj_t{test_id}_{mode}_{method}_%j.out
+#SBATCH --error={LOG_DIR}/nj_t{test_id}_{mode}_{method}_%j.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user={SLURM_EMAIL}
 
-{overcommit_note}
 set -euo pipefail
 
 # ── Environment ───────────────────────────────────────────────────────────────
@@ -173,7 +145,7 @@ export OPENBLAS_NUM_THREADS=1
 export TMPDIR="{tmpdir}"
 export OCSMESH_SHARED_TMPDIR="{tmpdir}"
 
-mkdir -p "{out_dir}" "{tmpdir}" "{_THIS_DIR}/logs"
+mkdir -p "{out_dir}" "{tmpdir}" "{LOG_DIR}"
 
 # Change to script directory so relative imports work
 cd "{SCRIPT_DIR}"
@@ -181,7 +153,7 @@ cd "{SCRIPT_DIR}"
 echo "============================================================="
 echo "  NJ Test {test_id}: {test_name}  mode={mode}  method={method}"
 echo "  Job    : ${{SLURM_JOB_ID}}"
-echo "  Node   : ${{SLURM_NODELIST}}"
+echo "  Nodes  : ${{SLURM_JOB_NUM_NODES}} (${{SLURM_NODELIST}})"
 echo "  Date   : $(date)"
 echo "  Output : {out_dir}"
 echo "============================================================="
@@ -200,9 +172,9 @@ echo "============================================================="
 """
 
     script_name = (
-        f"slurm_nj_t{test_id}_{test_name}_{mode}_{method}.sh"
+        f"slurm_gaea_nj_t{test_id}_{test_name}_{mode}_{method}.sh"
     )
-    script_path = _THIS_DIR / script_name
+    script_path = SLURM_DIR / script_name
     script_path.write_text(content)
     script_path.chmod(script_path.stat().st_mode | stat.S_IEXEC)
     return script_path
@@ -210,26 +182,26 @@ echo "============================================================="
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate (and optionally submit) all 48 NJ SLURM scripts."
+        description="Generate (and optionally submit) all 60 Gaea NJ SLURM scripts."
     )
     parser.add_argument("--submit",  action="store_true",
                         help="Submit all generated scripts with sbatch.")
     parser.add_argument("--test",    type=int,   default=None,
                         help="Generate only for this test ID.")
     parser.add_argument("--mode",    default=None,
-                        choices=["serial","parallel","mpi_no_pool","mpi_hybrid"],
+                        choices=MODES,
                         help="Generate only for this mode.")
     parser.add_argument("--method",  default=None,
                         choices=["fast","exact"],
                         help="Generate only for this method.")
     args = parser.parse_args()
 
-    (_THIS_DIR / "logs").mkdir(exist_ok=True)
+    SLURM_DIR.mkdir(exist_ok=True)
+    LOG_DIR.mkdir(exist_ok=True)
 
     tests   = [t for t in TESTS
                if args.test is None or t["id"] == args.test]
-    modes   = [m for m in
-               ["serial","parallel","mpi_no_pool","mpi_hybrid"]
+    modes   = [m for m in MODES
                if args.mode is None or m == args.mode]
     methods = [m for m in METHODS
                if args.method is None or m == args.method]
@@ -243,7 +215,7 @@ def main() -> None:
                 scripts.append(path)
                 print(f"  Generated: {path.name}")
 
-    print(f"\n{len(scripts)} scripts generated in {_THIS_DIR}")
+    print(f"\n{len(scripts)} scripts generated in {SLURM_DIR}")
 
     if args.submit:
         print("\nSubmitting ...")
@@ -252,7 +224,7 @@ def main() -> None:
             result = subprocess.run(
                 ["sbatch", str(s)],
                 capture_output=True, text=True,
-                cwd=str(_THIS_DIR),
+                cwd=str(SLURM_DIR),
             )
             if result.returncode == 0:
                 # Gaea sbatch output: "Submitted batch job JOBID on cluster c6"
@@ -266,12 +238,12 @@ def main() -> None:
         print("Monitor: squeue -u $USER")
     else:
         print("\nTo submit all:")
-        print("  python generate_slurm_scripts.py --submit")
+        print("  python generate_slurm_scripts_gaea.py --submit")
         print("\nTo submit a subset:")
-        print("  python generate_slurm_scripts.py --test 0 --submit")
-        print("  python generate_slurm_scripts.py --mode serial --submit")
+        print("  python generate_slurm_scripts_gaea.py --test 0 --submit")
+        print("  python generate_slurm_scripts_gaea.py --mode serial --submit")
         print(
-            "  python generate_slurm_scripts.py "
+            "  python generate_slurm_scripts_gaea.py "
             "--test 0 --mode serial --method exact --submit"
         )
 
