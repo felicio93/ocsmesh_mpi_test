@@ -13,6 +13,14 @@ Usage
     python diagnose_channels.py --source ninth --index 0
     python diagnose_channels.py --source gebco --index 0 --tolerance 50
     python diagnose_channels.py --source third --index 3 --skip-hfun
+
+Multi-tile mode (reproduces the full-pipeline assembly on a subset; skips
+the per-tile polygon step). Tiles are the FIRST n of each source, by
+manifest priority; --domain clips them to the benchmark AOI like the real
+run does:
+
+    python diagnose_channels.py --tiles gebco:2,third:2,ninth:2 --domain --tolerance 50
+    python diagnose_channels.py --tiles gebco:2,third:2,ninth:2 --domain   # tolerance=None
 """
 
 from __future__ import annotations
@@ -28,7 +36,7 @@ from shapely.geometry import box
 
 from ocsmesh import Raster, Hfun
 
-from nj_mesh_config_gaea import MANIFEST_PATH, HMIN, HMAX, CHANNELS
+from nj_mesh_config_gaea import MANIFEST_PATH, DOMAIN_SHP, HMIN, HMAX, CHANNELS
 
 _SOURCES = {"gebco": "gebco", "third": "ncei_third", "ninth": "ncei_ninth"}
 
@@ -46,6 +54,50 @@ def pick_tile(manifest_path: Path, source: str, index: int) -> str:
     return entries[index]["path"]
 
 
+def pick_many(manifest_path: Path, spec: str):
+    """'gebco:2,third:2' -> first n tile paths of each source."""
+    paths = []
+    for part in spec.split(","):
+        src, n = part.split(":")
+        manifest = json.load(open(manifest_path))
+        entries = sorted(
+            (e for e in manifest.values()
+             if e.get("available") and e["source"] == _SOURCES[src]),
+            key=lambda e: e["priority"])
+        paths += [e["path"] for e in entries[: int(n)]]
+    return paths
+
+
+def load_domain():
+    gdf = gpd.read_file(DOMAIN_SHP)
+    if gdf.crs and not gdf.crs.equals("EPSG:4326"):
+        gdf = gdf.to_crs("EPSG:4326")
+    return gdf.union_all(), gdf.crs
+
+
+def run_multi(paths, args, width, target, rate) -> None:
+    print(f"{len(paths)} tiles:", *[Path(p).name for p in paths], sep="\n  ")
+    kw = {}
+    if args.domain:
+        shape, crs = load_domain()
+        kw = dict(base_shape=shape, base_shape_crs=crs)
+    for with_channel in (False, True):
+        hfun = Hfun(paths, hmin=HMIN, hmax=HMAX, nprocs=4,
+                    method="exact", **kw)
+        hfun.execution_mode = "serial"
+        if with_channel:
+            hfun.add_channel(level=0.0, width=width, target_size=target,
+                             expansion_rate=rate, tolerance=args.tolerance)
+        t0 = time.perf_counter()
+        md = hfun.meshdata()
+        v = np.asarray(md.values).ravel()
+        q = np.nanpercentile(v, [0, 5, 25, 50, 75, 95, 100])
+        print(f"\nhfun {'WITH' if with_channel else 'WITHOUT'} channel "
+              f"({time.perf_counter() - t0:.1f}s, {md.num_nodes} nodes)")
+        print("  percentiles 0/5/25/50/75/95/100:", np.round(q, 1).tolist())
+        print(f"  fraction at HMIN({HMIN:g}): {(v <= HMIN).mean():.2%}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -57,9 +109,17 @@ def main() -> None:
                          "benchmark currently uses")
     ap.add_argument("--out", type=Path, default=Path("results_gaea/diagnose"))
     ap.add_argument("--skip-hfun", action="store_true")
+    ap.add_argument("--tiles", default=None,
+                    help="multi-tile mode, e.g. gebco:2,third:2,ninth:2")
+    ap.add_argument("--domain", action="store_true",
+                    help="multi-tile mode: clip to the benchmark AOI")
     args = ap.parse_args()
 
     width, target, rate, _ = CHANNELS[0]
+    if args.tiles:
+        run_multi(pick_many(args.manifest, args.tiles), args,
+                  width, target, rate)
+        return
     path = pick_tile(args.manifest, args.source, args.index)
     args.out.mkdir(parents=True, exist_ok=True)
     stem = f"{args.source}_{args.index}_tol{args.tolerance}"
