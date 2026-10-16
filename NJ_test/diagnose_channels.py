@@ -54,8 +54,18 @@ def pick_tile(manifest_path: Path, source: str, index: int) -> str:
     return entries[index]["path"]
 
 
-def pick_many(manifest_path: Path, spec: str):
-    """'gebco:2,third:2' -> first n tile paths of each source."""
+def _intersects_domain(tif_path: str, domain_shape) -> bool:
+    import rasterio
+    with rasterio.open(tif_path) as src:
+        b = src.bounds
+        return box(b.left, b.bottom, b.right, b.top).intersects(domain_shape)
+
+
+def pick_many(manifest_path: Path, spec: str, domain_shape=None):
+    """'gebco:2,third:2' -> first n tile paths of each source.
+
+    With domain_shape, only tiles whose bounds intersect the AOI count.
+    """
     paths = []
     for part in spec.split(","):
         src, n = part.split(":")
@@ -64,7 +74,11 @@ def pick_many(manifest_path: Path, spec: str):
             (e for e in manifest.values()
              if e.get("available") and e["source"] == _SOURCES[src]),
             key=lambda e: e["priority"])
-        paths += [e["path"] for e in entries[: int(n)]]
+        cand = [e["path"] for e in entries]
+        if domain_shape is not None:
+            cand = [c for c in cand if _intersects_domain(c, domain_shape)]
+        print(f"  {src}: {len(cand)} candidate tiles, using {min(int(n), len(cand))}")
+        paths += cand[: int(n)]
     return paths
 
 
@@ -117,7 +131,8 @@ def main() -> None:
 
     width, target, rate, _ = CHANNELS[0]
     if args.tiles:
-        run_multi(pick_many(args.manifest, args.tiles), args,
+        dom = load_domain()[0] if args.domain else None
+        run_multi(pick_many(args.manifest, args.tiles, dom), args,
                   width, target, rate)
         return
     path = pick_tile(args.manifest, args.source, args.index)
