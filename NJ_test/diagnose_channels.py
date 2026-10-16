@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -35,6 +36,9 @@ import geopandas as gpd
 from shapely.geometry import box
 
 from ocsmesh import Raster, Hfun
+
+# every channel polygon is replayed on every tile; most miss most tiles
+warnings.filterwarnings("ignore", message="shapes are outside bounds")
 
 from nj_mesh_config_gaea import MANIFEST_PATH, DOMAIN_SHP, HMIN, HMAX, CHANNELS
 
