@@ -4,6 +4,9 @@ Write a small manifest containing the first n AOI-intersecting tiles of each
 source, for fast debugging of build_nj_mesh_gaea.py.
 
     python make_subset_manifest.py gebco:1,third:2,ninth:2 NJ_dem_manifest_small.json
+
+Suffix a source with _out to take tiles that do NOT intersect the AOI polygon
+(bounds only overlap its bounding box), e.g. gebco_out:1,third_out:12.
 """
 import json
 import sys
@@ -25,6 +28,9 @@ def main(spec: str, out: str) -> None:
     keep = {}
     for part in spec.split(","):
         src, n = part.split(":")
+        outside = src.endswith("_out")
+        if outside:
+            src = src[: -len("_out")]
         entries = sorted((e for e in manifest.values()
                           if e.get("available") and e["source"] == SRC[src]),
                          key=lambda e: e["priority"])
@@ -32,11 +38,12 @@ def main(spec: str, out: str) -> None:
         for e in entries:
             with rasterio.open(e["path"]) as r:
                 b = r.bounds
-            if box(b.left, b.bottom, b.right, b.top).intersects(aoi):
+            if box(b.left, b.bottom, b.right, b.top).intersects(aoi) != outside:
                 sel.append(e)
         for e in sel[: int(n)]:
             keep[e["name"]] = e
-        print(f"{src}: {len(sel)} AOI tiles, kept {min(int(n), len(sel))}")
+        print(f"{src}{'_out' if outside else ''}: {len(sel)} tiles, "
+              f"kept {min(int(n), len(sel))}")
     Path(out).write_text(json.dumps(keep, indent=2))
     print(f"wrote {out} ({len(keep)} tiles)")
 
