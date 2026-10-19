@@ -115,7 +115,8 @@ def _tile_intersects_domain(tif_path: str, domain_shape) -> bool:
     from shapely.geometry import box
     with rasterio.open(tif_path) as src:
         b = src.bounds
-        if src.crs is not None and not src.crs.equals("EPSG:4326"):
+        if src.crs is not None:
+            # no-op for EPSG:4326 tiles; rasterio's CRS has no .equals()
             b = transform_bounds(src.crs, "EPSG:4326", *b)
     return box(*b).intersects(domain_shape)
 
