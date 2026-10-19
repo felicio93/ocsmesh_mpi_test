@@ -20,3 +20,4 @@ NJ_dem_manifest.json
 results_gaea/
 logs_gaea/
 slurm_gaea/
+results_gaea_dbg/

@@ -281,6 +281,7 @@ def run_test(
     method: str,
     manifest_path: Path,
     out_dir: Path,
+    hfun_only: bool = False,
 ) -> Dict:
 
     test_cfg = next((t for t in TESTS if t["id"] == test_id), None)
@@ -325,7 +326,7 @@ def run_test(
         # MeshDriver, so workers skip it (avoids N redundant builds
         # hammering the shared filesystem).
         geom = None
-        if _IS_MANAGER:
+        if _IS_MANAGER and not hfun_only:
             t0 = time.perf_counter()
             geom = build_geom(
                 raster_paths, domain_shape, domain_crs, nprocs)
@@ -376,46 +377,47 @@ def run_test(
         except Exception:
             pass
 
-        # MeshDriver
-        _logger.info(
-            f"Running MeshDriver "
-            f"(engine={MESH_ENGINE}, bnd={MESH_BND_REPR}) ..."
-        )
-        t0 = time.perf_counter()
-        driver = MeshDriver(
-            geom, hfun,
-            engine_name=MESH_ENGINE,
-            bnd_representation=MESH_BND_REPR,
-        )
-        final_mesh = driver.run()
-        summary["meshdriver_time_s"] = round(
-            time.perf_counter() - t0, 2)
-        _logger.info(
-            f"MeshDriver done in {summary['meshdriver_time_s']:.1f}s"
-        )
-
-        # Save mesh
-        mesh_path = (
-            out_dir /
-            f"mesh_t{test_id}_{test_cfg['name']}_{mode}_{method}.2dm"
-        )
-        final_mesh.write(
-            str(mesh_path), format="2dm", overwrite=True)
-        _logger.info(f"Mesh saved: {mesh_path.name}")
-        summary["mesh_path"] = str(mesh_path)
-
-        # Mesh stats
-        try:
-            md = final_mesh.meshdata
-            n_nodes = md.num_nodes
-            n_tria  = len(md.tria)
-            summary["mesh_nodes"]     = int(n_nodes)
-            summary["mesh_triangles"] = int(n_tria)
+        if not hfun_only:
+            # MeshDriver
             _logger.info(
-                f"Mesh: {n_nodes:,} nodes, {n_tria:,} triangles"
+                f"Running MeshDriver "
+                f"(engine={MESH_ENGINE}, bnd={MESH_BND_REPR}) ..."
             )
-        except Exception as e:
-            _logger.warning(f"Could not get mesh stats: {e}")
+            t0 = time.perf_counter()
+            driver = MeshDriver(
+                geom, hfun,
+                engine_name=MESH_ENGINE,
+                bnd_representation=MESH_BND_REPR,
+            )
+            final_mesh = driver.run()
+            summary["meshdriver_time_s"] = round(
+                time.perf_counter() - t0, 2)
+            _logger.info(
+                f"MeshDriver done in {summary['meshdriver_time_s']:.1f}s"
+            )
+
+            # Save mesh
+            mesh_path = (
+                out_dir /
+                f"mesh_t{test_id}_{test_cfg['name']}_{mode}_{method}.2dm"
+            )
+            final_mesh.write(
+                str(mesh_path), format="2dm", overwrite=True)
+            _logger.info(f"Mesh saved: {mesh_path.name}")
+            summary["mesh_path"] = str(mesh_path)
+
+            # Mesh stats
+            try:
+                md = final_mesh.meshdata
+                n_nodes = md.num_nodes
+                n_tria  = len(md.tria)
+                summary["mesh_nodes"]     = int(n_nodes)
+                summary["mesh_triangles"] = int(n_tria)
+                _logger.info(
+                    f"Mesh: {n_nodes:,} nodes, {n_tria:,} triangles"
+                )
+            except Exception as e:
+                _logger.warning(f"Could not get mesh stats: {e}")
 
         summary["status"] = "success"
 
@@ -468,6 +470,10 @@ def main() -> None:
     parser.add_argument("--manifest",      type=Path, default=MANIFEST_PATH)
     parser.add_argument("--results-root",  type=Path, default=RESULTS_ROOT)
     parser.add_argument("--list-tests",    action="store_true")
+    parser.add_argument(
+        "--hfun-only", action="store_true",
+        help="Debug: skip Geom and MeshDriver, stop after hfun.meshdata() "
+             "and its stats.")
     args = parser.parse_args()
 
     if args.list_tests:
@@ -504,6 +510,7 @@ def main() -> None:
         method=args.method,
         manifest_path=args.manifest.resolve(),
         out_dir=out_dir.resolve(),
+        hfun_only=args.hfun_only,
     )
 
 
