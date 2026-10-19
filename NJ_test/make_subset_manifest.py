@@ -7,6 +7,7 @@ source, for fast debugging of build_nj_mesh_gaea.py.
 
 Suffix a source with _out to take tiles that do NOT intersect the AOI polygon
 (bounds only overlap its bounding box), e.g. gebco_out:1,third_out:12.
+The count may be a slice a-b (by priority order), e.g. ninth_out:0-6, to bisect.
 """
 import json
 import sys
@@ -40,10 +41,16 @@ def main(spec: str, out: str) -> None:
                 b = r.bounds
             if box(b.left, b.bottom, b.right, b.top).intersects(aoi) != outside:
                 sel.append(e)
-        for e in sel[: int(n)]:
+        if "-" in n:
+            a, b = (int(x) for x in n.split("-"))
+        else:
+            a, b = 0, int(n)
+        for e in sel[a:b]:
             keep[e["name"]] = e
         print(f"{src}{'_out' if outside else ''}: {len(sel)} tiles, "
-              f"kept {min(int(n), len(sel))}")
+              f"kept {len(sel[a:b])} ({a}-{b})")
+        for e in sel[a:b]:
+            print("   ", e["name"])
     Path(out).write_text(json.dumps(keep, indent=2))
     print(f"wrote {out} ({len(keep)} tiles)")
 
