@@ -21,6 +21,12 @@ run does:
 
     python diagnose_channels.py --tiles gebco:2,third:2,ninth:2 --domain --tolerance 50
     python diagnose_channels.py --tiles gebco:2,third:2,ninth:2 --domain   # tolerance=None
+
+Suffix a source with _out to select the manifest tiles that do NOT intersect
+the AOI polygon (their bounds only overlap its bounding box). The benchmark
+feeds these to Hfun too; this reproduces that:
+
+    python diagnose_channels.py --tiles gebco:1,third:1,ninth:1,third_out:2,ninth_out:2 --domain --tolerance 50
 """
 
 from __future__ import annotations
@@ -73,6 +79,9 @@ def pick_many(manifest_path: Path, spec: str, domain_shape=None):
     paths = []
     for part in spec.split(","):
         src, n = part.split(":")
+        outside = src.endswith("_out")      # e.g. ninth_out:2
+        if outside:
+            src = src[: -len("_out")]
         manifest = json.load(open(manifest_path))
         entries = sorted(
             (e for e in manifest.values()
@@ -80,8 +89,10 @@ def pick_many(manifest_path: Path, spec: str, domain_shape=None):
             key=lambda e: e["priority"])
         cand = [e["path"] for e in entries]
         if domain_shape is not None:
-            cand = [c for c in cand if _intersects_domain(c, domain_shape)]
-        print(f"  {src}: {len(cand)} candidate tiles, using {min(int(n), len(cand))}")
+            cand = [c for c in cand
+                    if _intersects_domain(c, domain_shape) != outside]
+        print(f"  {src}{'_out' if outside else ''}: {len(cand)} candidate "
+              f"tiles, using {min(int(n), len(cand))}")
         paths += cand[: int(n)]
     return paths
 
