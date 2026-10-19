@@ -108,21 +108,44 @@ def load_manifest(path: Path) -> Dict:
         return json.load(fh)
 
 
-def get_raster_paths(manifest: Dict) -> List[str]:
+def _tile_intersects_domain(tif_path: str, domain_shape) -> bool:
+    """True if the tile's footprint (in EPSG:4326) intersects the AOI polygon."""
+    import rasterio
+    from rasterio.warp import transform_bounds
+    from shapely.geometry import box
+    with rasterio.open(tif_path) as src:
+        b = src.bounds
+        if src.crs is not None and not src.crs.equals("EPSG:4326"):
+            b = transform_bounds(src.crs, "EPSG:4326", *b)
+    return box(*b).intersects(domain_shape)
+
+
+def get_raster_paths(manifest: Dict, domain_shape) -> List[str]:
+    """Raster paths by priority, keeping only tiles that intersect the AOI.
+
+    The manifest is built from the AOI *bounding box*, so it contains tiles
+    that miss the AOI polygon. OCSMesh keeps some of them (their bbox passes
+    Raster.clip) as all-nodata rasters (-99999), which end up clamped to HMIN
+    and turn the whole size function into a uniform HMIN (see the NJ test 4/5
+    investigation). They must never reach Hfun.
+    """
     entries = [v for v in manifest.values() if v.get("available")]
     entries.sort(key=lambda e: e["priority"])
-    paths = []
+    paths, kept = [], []
     for e in entries:
         p = Path(e["path"])
-        if p.exists():
-            paths.append(str(p))
-        else:
+        if not p.exists():
             _logger.warning(f"Missing: {p}")
+        elif not _tile_intersects_domain(str(p), domain_shape):
+            _logger.info(f"Skipping tile outside AOI polygon: {p.name}")
+        else:
+            paths.append(str(p))
+            kept.append(e)
     _logger.info(
-        f"Rasters: {len(paths)} "
-        f"(gebco={sum(1 for e in entries if e['source']=='gebco')}, "
-        f"third={sum(1 for e in entries if e['source']=='ncei_third')}, "
-        f"ninth={sum(1 for e in entries if e['source']=='ncei_ninth')})"
+        f"Rasters: {len(paths)} of {len(entries)} manifest tiles "
+        f"(gebco={sum(1 for e in kept if e['source']=='gebco')}, "
+        f"third={sum(1 for e in kept if e['source']=='ncei_third')}, "
+        f"ninth={sum(1 for e in kept if e['source']=='ncei_ninth')})"
     )
     return paths
 
@@ -318,8 +341,8 @@ def run_test(
 
     try:
         manifest     = load_manifest(manifest_path)
-        raster_paths = get_raster_paths(manifest)
         domain_shape, domain_crs = load_domain(DOMAIN_SHP)
+        raster_paths = get_raster_paths(manifest, domain_shape)
         summary["n_rasters"] = len(raster_paths)
 
         # Geom — not MPI-distributed in OCSMesh, and only rank 0 runs
