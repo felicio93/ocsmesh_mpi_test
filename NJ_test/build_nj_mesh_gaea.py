@@ -225,6 +225,7 @@ def build_geom(raster_paths, domain_shape, domain_crs, nprocs) -> Geom:
 def build_hfun(
     raster_paths, domain_shape, domain_crs,
     nprocs, execution_mode, method, test_cfg,
+    channel_tolerance=None,
 ) -> Hfun:
     _logger.info(
         f"Building Hfun  mode={execution_mode}  "
@@ -289,6 +290,7 @@ def build_hfun(
                 width=width,
                 target_size=target,
                 expansion_rate=rate,
+                tolerance=channel_tolerance,
             )
 
     _logger.info("Hfun refinements done.")
@@ -306,6 +308,7 @@ def run_test(
     manifest_path: Path,
     out_dir: Path,
     hfun_only: bool = False,
+    channel_tolerance=None,
 ) -> Dict:
 
     test_cfg = next((t for t in TESTS if t["id"] == test_id), None)
@@ -336,6 +339,7 @@ def run_test(
         "hmin":          HMIN,
         "hmax":          HMAX,
         "out_dir":       str(out_dir),
+        "channel_tolerance": channel_tolerance,
     }
 
     t_total = time.perf_counter()
@@ -361,6 +365,7 @@ def run_test(
         hfun = build_hfun(
             raster_paths, domain_shape, domain_crs,
             nprocs, ocsmesh_mode, method, test_cfg,
+            channel_tolerance=channel_tolerance,
         )
         summary["hfun_build_time_s"] = round(time.perf_counter() - t0, 2)
 
@@ -498,6 +503,10 @@ def main() -> None:
         "--hfun-only", action="store_true",
         help="Debug: skip Geom and MeshDriver, stop after hfun.meshdata() "
              "and its stats.")
+    parser.add_argument(
+        "--channel-tolerance", type=float, default=None,
+        help="Polygon simplification tolerance (m) for add_channel "
+             "(default: None = no simplification).")
     args = parser.parse_args()
 
     if args.list_tests:
@@ -535,6 +544,7 @@ def main() -> None:
         manifest_path=args.manifest.resolve(),
         out_dir=out_dir.resolve(),
         hfun_only=args.hfun_only,
+        channel_tolerance=args.channel_tolerance,
     )
 
 
