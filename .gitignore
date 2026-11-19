@@ -10,3 +10,5 @@ Unalakleet_test/logs/
 Unalakleet_test/__pycache__/
 Unalakleet_test/shapes/
 Unalakleet_test/dems/
+__pycache__/
+*.pyc
